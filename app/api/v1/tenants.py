@@ -45,6 +45,7 @@ from app.services.branding_service import (
     _validate_hex_color,
     STORAGE_ROOT,
 )
+from app.core.upload_validator import validate_logo
 
 router = APIRouter()
 
@@ -585,12 +586,18 @@ async def upload_logo_endpoint(
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong")
 
+    # FASE 3-S2.T1 — magic byte validation (mengganti trust terhadap
+    # `file.content_type` yang berasal dari client — bisa di-spoof).
+    detected_mime = validate_logo(content, file.filename)
+    # Pakai detected_mime bukan client-provided untuk konsistensi.
+    safe_content_type = detected_mime
+
     try:
         upload_logo(
             db, target,
             file_content=content,
             filename=file.filename or "logo",
-            content_type=file.content_type or "image/png",
+            content_type=safe_content_type,
             actor_user_id=current["id"],
         )
     except ValueError as e:

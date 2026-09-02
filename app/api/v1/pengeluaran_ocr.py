@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
+from app.core.upload_validator import validate_struk_ocr
 from app.models.pengeluaran import Pengeluaran
 from app.models.kategori_pengeluaran import KategoriPengeluaran
 from app.models.tenant import Tenant
@@ -144,10 +145,14 @@ async def ocr_batch_upload(
         saved_paths = []
 
         for f in files:
+            # FASE 3-S2.T1 — magic byte validation (defense vs polyglot/disguised)
+            content = await f.read()
+            validate_struk_ocr(content, f.filename)
+            await f.seek(0)
             safe_name = f"{uuid.uuid4().hex}_{f.filename}"
             full_path = os.path.join(UPLOAD_DIR, safe_name)
             with open(full_path, "wb") as out:
-                shutil.copyfileobj(f.file, out)
+                out.write(content)
             saved_paths.append(full_path)
 
             ocr_data = _extract_with_ollama(full_path)

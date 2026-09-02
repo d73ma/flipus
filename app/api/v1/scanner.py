@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.ai_engine.batch_processor import process_batch
 from app.core.database import get_db
 from app.core.security import encrypt_pii
+from app.core.upload_validator import validate_amplop_ocr
 from app.api.v1.auth import get_current_user
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
@@ -64,10 +65,15 @@ async def batch_upload(
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     paths = []
     for f in files:
+        # FASE 3-S2.T1 — magic byte validation (defense vs polyglot/disguised)
+        content = await f.read()
+        validate_amplop_ocr(content, f.filename)
+        # Reset cursor kalau file.upload butuh re-read (defensive)
+        await f.seek(0)
         safe_name = f"{uuid.uuid4().hex}_{f.filename}"
         full_path = os.path.join(UPLOAD_DIR, safe_name)
         with open(full_path, "wb") as out:
-            shutil.copyfileobj(f.file, out)
+            out.write(content)
         paths.append(full_path)
 
     result = process_batch(paths)
