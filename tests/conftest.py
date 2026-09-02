@@ -358,3 +358,37 @@ def create_kuitansi(test_db):
         db.close()
         return k
     return _make
+
+
+
+# =====================================================================
+# FASE 3-S2 (Sprint 1 K1 + Sprint 2 cleanup) — TEST ISOLATION
+# ---------------------------------------------------------------------
+# slowapi Limiter pakai storage_uri="memory://" (single-worker SQLite).
+# Storage ini di-share across test functions in same Python process,
+# sehingga test #11+ dapat 429 "Rate limit exceeded" karena testclient
+# IP dianggap sama oleh limiter.
+#
+# Fixture autouse ini reset storage antara tests sehingga test suite
+# jadi deterministik tanpa mengorbankan proteksi rate-limit di production.
+# =====================================================================
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset slowapi in-memory rate-limit storage between tests.
+
+    FASE 3-S1 K1: limiter = Limiter(key_func=get_remote_address,
+    storage_uri='memory://'). Memory storage di-share dalam satu Python
+    process, sehingga tanpa reset, request #11+ dari testclient (IP sama)
+    akan kena 429. Fixture ini dipanggil SETIAP test (autouse) untuk
+    reset storage setelah yield (post-test).
+    """
+    from app.core.rate_limiter import limiter
+    yield
+    # slowapi >= 0.1.9: storage adalah MovingWindowMemoryList dengan .reset()
+    storage = getattr(limiter, "_storage", None)
+    if storage is not None and hasattr(storage, "reset"):
+        try:
+            storage.reset()
+        except Exception:
+            pass  # jika backend storage tidak support reset, skip

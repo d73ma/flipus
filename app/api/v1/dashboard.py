@@ -88,13 +88,31 @@ class KuitansiOut(BaseModel):
 
 
 def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
-    """Ambil PersentaseConfig (MISI) untuk tenant ini. Default fallback."""
+    """Ambil PersentaseConfig (MISI) untuk tenant ini. Default fallback.
+
+    FASE 3-S2 regression fix: harus return 6 keys (Jerry Model B 3-tier):
+        pct_x_jemaat, pct_pt_jemaat, pct_khusus_jemaat  (Auditor Misi set)
+        pct_x_uni, pct_pt_uni, pct_khusus_uni            (Admin Uni set)
+
+    Sebelumnya hanya 3 keys jemaat — menyebabkan KeyError 'pct_x_uni'
+    di create_kuitansi (dashboard.py:192). Bug ini lolos dari FASE 2 S2/R1
+    karena test_accounting_integrity tidak exercise create_kuitansi endpoint.
+
+    Behavior:
+    - kalau tenant.misi_konferens_id None (admin/auditor placeholder) →
+      fallback SDA doctrine default (uni=0)
+    - kalau PersentaseConfig MISI tidak ditemukan → fallback sama
+    - kalau ada → pakai 6 field dari row
+    """
     if tenant.misi_konferens_id is None:
         # Tenant placeholder (admin/auditor), no config
         return {
             "pct_x_jemaat": 1.0,
             "pct_pt_jemaat": 0.5,
             "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.0,
+            "pct_pt_uni": 0.0,
+            "pct_khusus_uni": 0.0,
         }
     cfg = (
         db.query(PersentaseConfig)
@@ -107,8 +125,18 @@ def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
             "pct_x_jemaat": cfg.pct_x_jemaat,
             "pct_pt_jemaat": cfg.pct_pt_jemaat,
             "pct_khusus_jemaat": cfg.pct_khusus_jemaat,
+            "pct_x_uni": cfg.pct_x_uni,
+            "pct_pt_uni": cfg.pct_pt_uni,
+            "pct_khusus_uni": cfg.pct_khusus_uni,
         }
-    return {"pct_x_jemaat": 1.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0}
+    return {
+        "pct_x_jemaat": 1.0,
+        "pct_pt_jemaat": 0.5,
+        "pct_khusus_jemaat": 0.0,
+        "pct_x_uni": 0.0,
+        "pct_pt_uni": 0.0,
+        "pct_khusus_uni": 0.0,
+    }
 
 
 @router.post("/kuitansi", response_model=KuitansiOut)
