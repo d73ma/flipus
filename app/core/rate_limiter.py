@@ -42,11 +42,18 @@ def _key_func_by_phone(request: Request) -> str:
 
 # Limiter global - diaplikasikan via SlowAPIMiddleware di main.py
 # Storage: memory:// (single-worker). Untuk multi-worker pakai Redis.
+#
+# headers_enabled=False: endpoint FLIPUS mengembalikan Pydantic model
+# (TokenOut, UserOut, dll), bukan starlette.responses.Response. Jika True,
+# slowapi mencoba inject X-RateLimit-* headers ke response object yang
+# tidak ada → RuntimeError "parameter 'response' must be an instance of
+# starlette.responses.Response". Trade-off: klien tidak dapat header
+# X-RateLimit-*, tapi rate-limit tetap enforced (429 saat exceeded).
 limiter = Limiter(
     key_func=_key_func_by_ip,
     storage_uri="memory://",
     default_limits=[],  # Tidak ada default — opt-in per endpoint
-    headers_enabled=True,  # Kirim X-RateLimit-* headers di response
+    headers_enabled=False,
     strategy="fixed-window",  # Window-based counter (simple & cukup untuk K1/K2)
 )
 

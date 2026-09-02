@@ -28,6 +28,7 @@ from sqlalchemy.sql import func
 
 from app.core.database import get_db
 from app.core.security import encrypt_pii, decrypt_pii
+from app.core.rate_limiter import limiter as _rate_limiter
 from app.api.v1.auth import require_roles  # T94 Section 8: proper RBAC
 from app.models.audit import AuditLog
 from app.models.tenant import Tenant
@@ -54,9 +55,12 @@ log = logging.getLogger("flipus.wa_input")
 router = APIRouter()
 
 
-# === Anti-spam in-memory rate limiter ===
-_RATE_LIMIT: dict[str, float] = {}  # phone → last_msg_timestamp
-RATE_LIMIT_SECONDS = 2
+# === FASE 3 K2: WA webhook anti-spam rate limit (slowapi) ===
+# Sebelumnya pakai in-memory dict `_RATE_LIMIT` (process-local, hilang saat restart).
+# Sekarang slowapi Limiter (Redis-ready) dengan key_func per-phone via `request.state.wa_from`.
+# `wa_inbound` handler wajib set `request.state.wa_from` SEBELUM proses lanjut supaya
+# rate limit key unik per nomor pengirim.
+from app.core.rate_limiter import _key_func_by_phone  # noqa: E402  (shared key_func)
 
 
 # ==================== INBOUND WEBHOOK ====================
@@ -341,18 +345,6 @@ def _parse_shortcut_format(message: str) -> dict | None:
     return result
 
 
-# === Anti-spam ===
-
-def _check_rate_limit(phone: str) -> bool:
-    """Returns True kalau OK, False kalau terlalu cepat."""
-    now = time.time()
-    last = _RATE_LIMIT.get(phone, 0)
-    if now - last < RATE_LIMIT_SECONDS:
-        return False
-    _RATE_LIMIT[phone] = now
-    return True
-
-
 # === Main webhook endpoint ===
 
 @router.get("/wa/inbound")
@@ -365,7 +357,36 @@ async def wa_inbound_get():
     return {"status": "ok", "endpoint": "wa/inbound", "method": "GET"}
 
 
-@router.post("/wa/inbound")
+async def _set_wa_from_state(request: Request) -> None:
+    """
+    FASE 3 K2: pre-handler hook untuk set `request.state.wa_from` supaya
+    slowapi key_func (`_key_func_by_phone`) bisa rate-limit per phone.
+    Jalankan SEBELUM @limiter.limit() decorator wraps the function.
+    """
+    try:
+        # Fonnte mengirim form-data → coba itu dulu
+        try:
+            form = await request.form()
+            raw_sender = form.get("sender") or form.get("from") or ""
+        except Exception:
+            raw_sender = ""
+        if not raw_sender:
+            # Fallback: parse JSON body kalau form kosong
+            try:
+                import json as _json
+                raw = await request.body()
+                if raw:
+                    _body = _json.loads(raw)
+                    raw_sender = _body.get("sender") or _body.get("from") or ""
+            except Exception:
+                raw_sender = ""
+        request.state.wa_from = _normalize_phone(raw_sender) if raw_sender else ""
+    except Exception:
+        request.state.wa_from = ""
+
+
+@router.post("/wa/inbound", dependencies=[Depends(_set_wa_from_state)])
+@_rate_limiter.limit("1/2seconds", key_func=_key_func_by_phone)  # FASE 3 K2: anti-spam per-phone
 async def wa_inbound(request: Request, db: Session = Depends(get_db)):
     """
     Fonnte webhook untuk WA Input Bot.
@@ -449,10 +470,9 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
         log.warning(f"[WA-INBOUND] no phone in payload: {body}")
         return {"status": "ignored", "reason": "no phone"}
 
-    # Anti-spam
-    if not _check_rate_limit(phone):
-        log.info(f"[WA-INBOUND] rate-limited: {phone}")
-        return {"status": "ignored", "reason": "rate limited"}
+    # Anti-spam rate limit dipindah ke slowapi @limiter.limit (lihat decorator di /wa/inbound).
+    # Sebelumnya: `_check_rate_limit(phone)` di bawah ini. Sekarang K2 (FASE 3) pakai
+    # slowapi per-phone via Depends(_set_wa_from_state) → _key_func_by_phone.
 
     # Lookup sender
     users = (
