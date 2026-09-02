@@ -16,6 +16,7 @@ from sqlalchemy import or_
 from app.core.database import get_db
 from app.core.security import (
     create_access_token,
+    create_refresh_token,
     decode_access_token,
     generate_tenant_signature,
     hash_password,
@@ -26,6 +27,8 @@ from app.models.user import User
 from app.models.tenant import Tenant
 from app.models.audit import AuditLog
 from app.models.revoked_token import RevokedToken
+# FASE 3-S3.S8 — refresh token server-side store.
+from app.models.refresh_token import RefreshToken
 from app.utils.password_gen import generate_random_password, mask_password, validate_password_strength
 from app.services.whatsapp import send_simple_message
 from app.services.tenant_service import slugify
@@ -47,8 +50,13 @@ class LoginIn(BaseModel):
 
 
 class TokenOut(BaseModel):
+    """FASE 3-S3.S8 — return both access_token (15 min) AND refresh_token (7 day)."""
     access_token: str
+    refresh_token: str  # NEW: long-lived refresh credential (server-side stored)
     token_type: str = "bearer"
+    # Access token TTL in seconds (15 min = 900). Client boleh pakai ini untuk
+    # schedule refresh (e.g., expire - 60 detik) supaya seamless UX.
+    expires_in: int = 900
     role: str
     tenant_id: int
     tenant_slug: Optional[str] = None
@@ -504,14 +512,21 @@ def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
                 payload_hash=user.username,
             ))
             db.commit()
-            # Issue full JWT
-            token = create_access_token({
+            # FASE 3-S3.S8 — issue BOTH access (15-min) AND refresh (7-day) tokens.
+            access = create_access_token({
                 "sub": user.id,
                 "role": user.role,
                 "tenant_id": user.tenant_id,
             })
+            refresh = create_refresh_token({
+                "sub": user.id,
+                "role": user.role,
+                "tenant_id": user.tenant_id,
+            })
+            _persist_refresh_token(db, refresh, user, request)
             return TokenOut(
-                access_token=token,
+                access_token=access,
+                refresh_token=refresh,
                 role=user.role,
                 tenant_id=user.tenant_id,
                 tenant_slug=user_tenant.slug,
@@ -530,26 +545,71 @@ def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
                 username=user.username,
             )
 
-    # No 2FA — direct token (legacy flow)
-    # T44: Record successful login untuk audit trail
-    db.add(AuditLog(
-        tenant_id=user.tenant_id,
-        action=f"LOGIN_SUCCESS_user_{user.id}",
-        payload_hash=user.username,
-    ))
-    db.commit()
-    token = create_access_token({
+    # FASE 3-S3.S8 — issue both tokens (legacy no-2FA path).
+    access = create_access_token({
         "sub": user.id,
         "role": user.role,
         "tenant_id": user.tenant_id,
     })
+    refresh = create_refresh_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    _persist_refresh_token(db, refresh, user, request)
     return TokenOut(
-        access_token=token,
+        access_token=access,
+        refresh_token=refresh,
         role=user.role,
         tenant_id=user.tenant_id,
         tenant_slug=user_tenant.slug,
         tenant_status=user_tenant.status,
     )
+
+
+# ===== FASE 3-S3.S8 — refresh token helpers =====
+
+def _client_ip(request: Request) -> str:
+    """Extract client IP (X-Forwarded-For aware, sama dengan auth.py lain)."""
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _persist_refresh_token(db: Session, refresh_jwt: str, user: User, request: Request) -> None:
+    """Simpan refresh token JTI ke tabel RefreshToken.
+
+    Dipanggil setiap kali login / refresh issue token baru. Kalau duplicate
+    (misalnya race condition), commit akan raise IntegrityError — kita catch
+    supaya tidak crash endpoint login user.
+    """
+    from sqlalchemy.exc import IntegrityError
+    try:
+        payload = decode_access_token(refresh_jwt) or {}
+    except Exception:
+        payload = {}
+    jti = payload.get("jti")
+    exp_ts = payload.get("exp")
+    if not jti or not exp_ts:
+        return  # defensive — tidak bisa store tanpa JTI/exp
+    expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+    row = RefreshToken(
+        jti=jti,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        expires_at=expires_at,
+        created_ip=_client_ip(request),
+        created_user_agent=(request.headers.get("user-agent") or "")[:255],
+    )
+    try:
+        db.add(row)
+        db.commit()
+    except IntegrityError:
+        # JTI sudah ada (race) — rollback agar session bersih, tidak propagate.
+        db.rollback()
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordOut)
@@ -700,6 +760,135 @@ class LogoutOut(BaseModel):
     message: str
 
 
+# ===== FASE 3-S3.S8 — refresh token endpoints =====
+
+class RefreshIn(BaseModel):
+    """Body untuk POST /auth/refresh. Client kirim refresh_token dari login/refresh sebelumnya."""
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=TokenOut)
+@_rate_limiter.limit("30/minute")
+def refresh(
+    data: RefreshIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """FASE 3-S3.S8 — Exchange refresh token untuk access token baru + new refresh (rotation).
+
+    Flow:
+      1. Decode JWT → verifikasi signature + cek typ="refresh"
+      2. Cari RefreshToken row by JTI
+         - kalau tidak ada → 401 (token not issued by us / forged)
+         - kalau revoked_at ≠ None → 401
+         - kalau used_at ≠ None → DETEKSI REUSE → revoke seluruh chain user
+      3. Verify user masih ada & aktif
+      4. Mark old row used_at=now()
+      5. Issue new access (15-min) + new refresh (7-day)
+      6. Persist new refresh row
+      7. Return TokenOut
+    """
+    payload = decode_access_token(data.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token (signature / format)",
+        )
+    # Anti privilege-escalation: jangan boleh kirim access token sebagai refresh.
+    if payload.get("typ") != "refresh":
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token type salah: typ={payload.get('typ')!r}, diharapkan 'refresh'",
+        )
+
+    jti = payload.get("jti")
+    sub = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+    if not jti or not sub:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token tidak punya JTI/sub (legacy token?)",
+        )
+
+    rt = db.query(RefreshToken).filter(RefreshToken.jti == jti).first()
+    if not rt:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not recognized",
+        )
+    if rt.revoked_at is not None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail=f"Refresh token sudah di-revoke: {rt.revoked_reason}",
+        )
+
+    if rt.used_at is not None:
+        # Reuse detection — kemungkinan token dicuri. Revoke seluruh chain.
+        all_rt = db.query(RefreshToken).filter(
+            RefreshToken.user_id == rt.user_id,
+            RefreshToken.revoked_at.is_(None),
+        ).all()
+        for r in all_rt:
+            r.revoked_at = datetime.now(timezone.utc)
+            r.revoked_reason = "reuse_detected"
+        db.add(AuditLog(
+            tenant_id=rt.tenant_id,
+            action=f"REFRESH_REUSE_DETECTED_user_{rt.user_id}_revoked_{len(all_rt)}",
+            payload_hash=jti[:32],
+        ))
+        db.commit()
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token sudah dipakai. Semua sesi direvoke. Silakan login ulang.",
+        )
+
+    user = db.query(User).filter(User.id == rt.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="User account sudah non-aktif",
+        )
+    if user.tenant_id != tenant_id:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Tenant mismatch in refresh token",
+        )
+
+    # SUCCESS — rotate.
+    rt.used_at = datetime.now(timezone.utc)
+    rt.redeemed_ip = _client_ip(request)
+    rt.redeemed_user_agent = (request.headers.get("user-agent") or "")[:255]
+
+    new_access = create_access_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    new_refresh = create_refresh_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    _persist_refresh_token(db, new_refresh, user, request)
+
+    db.add(AuditLog(
+        tenant_id=user.tenant_id,
+        action=f"REFRESH_OK_user_{user.id}_rotated_{jti[:12]}",
+        payload_hash=user.username,
+    ))
+    db.commit()
+
+    user_tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    return TokenOut(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        role=user.role,
+        tenant_id=user.tenant_id,
+        tenant_slug=user_tenant.slug if user_tenant else None,
+        tenant_status=user_tenant.status if user_tenant else None,
+    )
+
+
 @router.post("/logout", response_model=LogoutOut)
 def logout(
     request: Request,
@@ -756,10 +945,22 @@ def logout(
     )
     db.add(revoked)
 
+    # FASE 3-S3.S8 — kalau access token dipakai, revoke semua refresh token
+    # aktif milik user ini (semantik logout-all). Untuk logout per-device,
+    # client harus kirim refresh_token eksplisit (planned v1.6).
+    rt_rows = db.query(RefreshToken).filter(
+        RefreshToken.user_id == current["id"],
+        RefreshToken.revoked_at.is_(None),
+        RefreshToken.used_at.is_(None),
+    ).all()
+    for rt in rt_rows:
+        rt.revoked_at = datetime.now(timezone.utc)
+        rt.revoked_reason = "logout_access_token"
+
     # Audit log
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
-        action=f"LOGOUT_user_{current['id']}",
+        action=f"LOGOUT_user_{current['id']}_rt_revoked={len(rt_rows)}",
         payload_hash=jti[:32],  # simpan prefix jti sebagai audit trail
     ))
     db.commit()

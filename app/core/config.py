@@ -6,7 +6,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     SECRET_KEY_PREVIOUS: str = ""  # Optional: dual-key rotation grace window
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    # FASE 3-S3.S8 — diperpendek dari 8 jam (480) ke 15 menit, dikompensasi
+    # dengan refresh token 7 hari. Best practice OWASP JWT cheat sheet:
+    # access token < 30 min, refresh token > 1 hari, refresh stored server-side.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PII_ENCRYPTION_KEY: str
     # FASE 3-S2.T3 — dual-key rotation window untuk PII Fernet.
     # Saat rotasi:
