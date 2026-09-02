@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FLIPUS — Sistem Perpuluhan GMAHK UKIKT</title>
+<style>
+  /* ===== Reset & base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --c-white: #FFFFFF;
+    --c-ivory: #F7F8F5;
+    --c-sabbath: #1F3A2D;
+    --c-sabbath-2: #2D5A40;
+    --c-gold: #C9A961;
+    --c-gold-soft: #E0CB94;
+    --c-sage: #5A7A65;
+    --c-ink: #1A1A1A;
+    --c-ink-muted: #4A5759;
+    --c-line: #E2E5E0;
+    --font-display: Georgia, 'Times New Roman', 'Cambria', serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', Menlo, 'Consolas', monospace;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font-body);
+    color: var(--c-ink);
+    background: var(--c-white);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== Signature pattern: subtle perpuluhan column lines ===== */
+  .col-lines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .col-lines::before,
+  .col-lines::after {
+    content: '';
+    position: absolute;
+    width: 1px;
+    height: 120%;
+    top: -10%;
+    opacity: 0.5;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      var(--c-sage) 30%,
+      var(--c-gold) 70%,
+      transparent 100%);
+  }
+  .col-lines::before { left: 8%; }
+  .col-lines::after { right: 8%; }
+  .col-lines .line {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 100%;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      var(--c-line) 40%,
+      var(--c-line) 60%,
+      transparent 100%);
+    opacity: 0.6;
+  }
+  .col-lines .line:nth-child(1) { left: 14%; }
+  .col-lines .line:nth-child(2) { left: 20%; }
+  .col-lines .line:nth-child(3) { left: 80%; }
+  .col-lines .line:nth-child(4) { left: 86%; }
+
+  /* ===== Header ===== */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--c-line);
+  }
+  .nav-row {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--c-sabbath);
+    color: var(--c-gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 0.5px;
+    border: 2px solid var(--c-gold);
+  }
+  .brand-text {
+    line-height: 1.1;
+  }
+  .brand-text .name {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--c-sabbath);
+    letter-spacing: 0.5px;
+  }
+  .brand-text .sub {
+    font-size: 11px;
+    color: var(--c-ink-muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .nav-links a {
+    color: var(--c-ink);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--c-sabbath); }
+  .nav-cta {
+    padding: 9px 18px;
+    background: var(--c-sabbath);
+    color: var(--c-white) !important;
+    border-radius: 8px;
+    font-weight: 600 !important;
+  }
+  .nav-cta:hover { background: var(--c-sabbath-2); }
+
+  /* ===== Hero ===== */
+  .hero {
+    position: relative;
+    padding: 80px 32px 100px;
+    background: var(--c-white);
+  }
+  .hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 980px;
+    margin: 0 auto;
+    text-align: center;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--c-sage);
+    font-weight: 600;
+    margin-bottom: 24px;
+    padding: 6px 14px;
+    border: 1px solid var(--c-line);
+    border-radius: 100px;
+    background: var(--c-ivory);
+  }
+  .hero h1 {
+    font-family: var(--font-display);
+    font-size: clamp(56px, 9vw, 96px);
+    line-height: 1.05;
+    color: var(--c-sabbath);
+    font-weight: 700;
+    letter-spacing: -1px;
+    margin-bottom: 24px;
+  }
+  .hero h1 .accent {
+    color: var(--c-gold);
+    font-style: italic;
+  }
+  .hero .sub {
+    font-size: 19px;
+    color: var(--c-ink-muted);
+    max-width: 600px;
+    margin: 0 auto 36px;
+    line-height: 1.55;
+  }
+  .cta-row {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 64px;
+  }
+  .btn {
+    padding: 14px 28px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary {
+    background: var(--c-sabbath);
+    color: var(--c-white);
+    box-shadow: 0 1px 0 var(--c-sabbath), 0 4px 12px rgba(31, 58, 45, 0.15);
+  }
+  .btn-primary:hover { background: var(--c-sabbath-2); transform: translateY(-1px); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--c-sabbath);
+    border: 1.5px solid var(--c-sabbath);
+  }
+  .btn-ghost:hover { background: var(--c-ivory); }
+
+  /* ===== Dashboard mockup ===== */
+  .mockup-wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    perspective: 1200px;
+  }
+  .mockup {
+    background: var(--c-white);
+    border-radius: 16px;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 12px 40px rgba(31, 58, 45, 0.12),
+      0 30px 80px rgba(0, 0, 0, 0.06);
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--c-line);
+  }
+  .mockup-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--c-ivory);
+    border-bottom: 1px solid var(--c-line);
+  }
+  .mockup-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--c-line);
+  }
+  .mockup-dot:nth-child(1) { background: #E26B6B; }
+  .mockup-dot:nth-child(2) { background: #E0CB94; }
+  .mockup-dot:nth-child(3) { background: #6BAA80; }
+  .mockup-url {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--c-ink-muted);
+    margin-left: 12px;
+  }
+  .mockup-body {
+    padding: 24px;
+    background: var(--c-white);
+  }
+  .mockup-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .mockup-kpi {
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--c-ivory);
+    border: 1px solid var(--c-line);
+  }
+  .mockup-kpi .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--c-ink-muted);
+    margin-bottom: 6px;
+  }
+  .mockup-kpi .value {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--c-sabbath);
+  }
+  .mockup-kpi .delta {
+    font-size: 11px;
+    color: var(--c-sage);
+    margin-top: 4px;
+  }
+  .mockup-chart {
+    height: 100px;
+    background: var(--c-ivory);
+    border-radius: 10px;
+    border: 1px solid var(--c-line);
+    position: relative;
+    overflow: hidden;
+    padding: 14px;
+  }
+  .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    height: 100%;
+    gap: 6px;
+  }
+  .chart-bar {
+    flex: 1;
+    background: linear-gradient(180deg, var(--c-gold) 0%, var(--c-sage) 100%);
+    border-radius: 3px 3px 0 0;
+    opacity: 0.85;
+  }
+
+  /* ===== Slogan bar ===== */
+  .slogan-bar {
+    background: var(--c-sabbath);
+    color: var(--c-white);
+    padding: 36px 32px;
+    text-align: center;
+  }
+  .slogan-bar p {
+    max-width: 800px;
+    margin: 0 auto;
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1.4;
+    font-style: italic;
+    color: var(--c-gold-soft);
+  }
+  .slogan-bar .author {
+    display: block;
+    margin-top: 12px;
+    font-family: var(--font-body);
+    font-style: normal;
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* ===== Features ===== */
+  .features {
+    padding: 100px 32px;
+    background: var(--c-white);
+  }
+  .features-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .section-label {
+    font-size: 12px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--c-sage);
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 42px;
+    color: var(--c-sabbath);
+    margin-bottom: 14px;
+    line-height: 1.15;
+  }
+  .section-lede {
+    font-size: 17px;
+    color: var(--c-ink-muted);
+    max-width: 600px;
+    margin-bottom: 56px;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature {
+    padding: 32px;
+    border-radius: 14px;
+    background: var(--c-ivory);
+    border: 1px solid var(--c-line);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .feature:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(31, 58, 45, 0.08);
+  }
+  .feature-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--c-sabbath);
+    color: var(--c-gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 22px;
+  }
+  .feature h3 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    color: var(--c-sabbath);
+    margin-bottom: 8px;
+  }
+  .feature p {
+    font-size: 14px;
+    color: var(--c-ink-muted);
+    line-height: 1.55;
+  }
+
+  /* ===== Stats ===== */
+  .stats {
+    background: var(--c-ivory);
+    padding: 60px 32px;
+    border-top: 1px solid var(--c-line);
+    border-bottom: 1px solid var(--c-line);
+  }
+  .stats-row {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 32px;
+    text-align: center;
+  }
+  .stat .num {
+    font-family: var(--font-display);
+    font-size: 48px;
+    color: var(--c-sabbath);
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .stat .unit {
+    color: var(--c-gold);
+    font-size: 28px;
+  }
+  .stat .label {
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--c-ink-muted);
+  }
+
+  /* ===== Demo CTA ===== */
+  .demo-cta {
+    padding: 80px 32px;
+    background: var(--c-white);
+    text-align: center;
+  }
+  .demo-cta-inner {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .demo-cta h2 {
+    font-family: var(--font-display);
+    font-size: 36px;
+    color: var(--c-sabbath);
+    margin-bottom: 16px;
+  }
+  .demo-cta p {
+    color: var(--c-ink-muted);
+    margin-bottom: 32px;
+    font-size: 16px;
+  }
+  .demo-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .demo-btn {
+    padding: 12px 22px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1.5px solid var(--c-sabbath);
+    color: var(--c-sabbath);
+    background: var(--c-white);
+    transition: background 0.2s;
+  }
+  .demo-btn:hover { background: var(--c-ivory); }
+
+  /* ===== Footer ===== */
+  footer {
+    background: var(--c-sabbath);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 60px 32px 24px;
+  }
+  .footer-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr;
+    gap: 48px;
+    margin-bottom: 40px;
+  }
+  .footer-col h4 {
+    color: var(--c-gold);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .footer-col p, .footer-col a {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    text-decoration: none;
+    line-height: 1.7;
+  }
+  .footer-col a:hover { color: var(--c-gold); }
+  .footer-bottom {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 900px) {
+    .feature-grid { grid-template-columns: 1fr; }
+    .mockup-grid { grid-template-columns: 1fr; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .footer-inner { grid-template-columns: 1fr; gap: 32px; }
+    .nav-links { display: none; }
+    .hero h1 { font-size: 56px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header>
+  <div class="nav-row">
+    <div class="brand">
+      <div class="brand-mark">G</div>
+      <div class="brand-text">
+        <div class="name">FLIPUS</div>
+        <div class="sub">GMAHK · UKIKT</div>
+      </div>
+    </div>
+    <nav class="nav-links">
+      <a href="#tentang">Tentang</a>
+      <a href="#fitur">Fitur</a>
+      <a href="#statistik">Statistik</a>
+      <a href="#demo">Demo</a>
+      <a href="/login" class="nav-cta">Masuk</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ===== Hero ===== -->
+<section class="hero">
+  <div class="col-lines">
+    <div class="line"></div>
+    <div class="line"></div>
+    <div class="line"></div>
+    <div class="line"></div>
+  </div>
+  <div class="hero-inner">
+    <span class="eyebrow">Sistem Perpuluhan GMAHK</span>
+    <h1>FLIPUS</h1>
+    <p class="sub">
+      Catatan perpuluhan & persembahan sabat yang terbuka, akuntabel, dan modern —
+      untuk pelayanan gereja di era digital.
+    </p>
+    <div class="cta-row">
+      <a href="#demo" class="btn btn-primary">Lihat Demo →</a>
+      <a href="/login" class="btn btn-ghost">Masuk</a>
+    </div>
+
+    <!-- Dashboard mockup -->
+    <div class="mockup-wrap">
+      <div class="mockup">
+        <div class="mockup-bar">
+          <div class="mockup-dot"></div>
+          <div class="mockup-dot"></div>
+          <div class="mockup-dot"></div>
+          <span class="mockup-url">flipus.org/bendahara</span>
+        </div>
+        <div class="mockup-body">
+          <div class="mockup-grid">
+            <div class="mockup-kpi">
+              <div class="label">Perpuluhan (X)</div>
+              <div class="value">Rp 8.450.000</div>
+              <div class="delta">↑ 12% dari minggu lalu</div>
+            </div>
+            <div class="mockup-kpi">
+              <div class="label">Persembahan (PT)</div>
+              <div class="value">Rp 3.200.000</div>
+              <div class="delta">↑ 5% dari minggu lalu</div>
+            </div>
+            <div class="mockup-kpi">
+              <div class="label">Kuitansi Sabat</div>
+              <div class="value">38</div>
+              <div class="delta">Sabat · 15 Ags 2026</div>
+            </div>
+          </div>
+          <div class="mockup-chart">
+            <div class="chart-bars">
+              <div class="chart-bar" style="height: 35%"></div>
+              <div class="chart-bar" style="height: 50%"></div>
+              <div class="chart-bar" style="height: 42%"></div>
+              <div class="chart-bar" style="height: 65%"></div>
+              <div class="chart-bar" style="height: 58%"></div>
+              <div class="chart-bar" style="height: 80%"></div>
+              <div class="chart-bar" style="height: 72%"></div>
+              <div class="chart-bar" style="height: 88%"></div>
+              <div class="chart-bar" style="height: 95%"></div>
+              <div class="chart-bar" style="height: 78%"></div>
+              <div class="chart-bar" style="height: 90%"></div>
+              <div class="chart-bar" style="height: 100%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Slogan ===== -->
+<section class="slogan-bar">
+  <p>
+    "Mewujudkan tata kelola persembahan yang terbuka, akuntabel, dan modern — untuk kemuliaan nama Tuhan."
+    <span class="author">FLIPUS · GMAHK UKIKT</span>
+  </p>
+</section>
+
+<!-- ===== Features ===== -->
+<section class="features" id="fitur">
+  <div class="features-inner">
+    <div class="section-label">Fitur Utama</div>
+    <h2 class="section-title">Dibangun untuk tata kelola gereja</h2>
+    <p class="section-lede">
+      Tiga hal yang paling banyak diminta oleh bendahara, ketua, dan admin misi — langsung jadi sederhana.
+    </p>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">⛪</div>
+        <h3>Multi-Tenant</h3>
+        <p>Setiap jemaat, misi, dan uni punya ruang sendiri. Data terpisah, branding terpisah, persentasi pembagian dikontrol Auditor.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📷</div>
+        <h3>OCR Amplop</h3>
+        <p>Foto amplop perpuluhan, sistem otomatis membaca nominal. Bendahara tinggal verifikasi, simpan, kirim.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📨</div>
+        <h3>WA Otomatis</h3>
+        <p>Laporan mingguan ke Pendeta via WhatsApp dengan lampiran PDF. Auto-thanks ke pemberi kalau nomornya terbaca.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Stats ===== -->
+<section class="stats" id="statistik">
+  <div class="stats-row">
+    <div class="stat">
+      <div class="num">12<span class="unit">+</span></div>
+      <div class="label">Jemaat</div>
+    </div>
+    <div class="stat">
+      <div class="num">5</div>
+      <div class="label">Misi Konferens</div>
+    </div>
+    <div class="stat">
+      <div class="num">1</div>
+      <div class="label">Uni</div>
+    </div>
+    <div class="stat">
+      <div class="num">99.9<span class="unit">%</span></div>
+      <div class="label">Uptime</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Demo CTA ===== -->
+<section class="demo-cta" id="demo">
+  <div class="demo-cta-inner">
+    <div class="section-label">Coba Sekarang</div>
+    <h2>Lihat FLIPUS dari sudut pandang setiap peran</h2>
+    <p>
+      Masuk sebagai Bendahara, Ketua, Pendeta, atau Auditor — tanpa daftar.
+      Data dummy, banner mode demo, auto-expire 30 menit.
+    </p>
+    <div class="demo-buttons">
+      <a href="/demo/bendahara" class="demo-btn">Coba sebagai Bendahara</a>
+      <a href="/demo/ketua" class="demo-btn">Coba sebagai Ketua</a>
+      <a href="/demo/pendeta" class="demo-btn">Coba sebagai Pendeta</a>
+      <a href="/demo/auditor" class="demo-btn">Coba sebagai Auditor</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>FLIPUS</h4>
+      <p>Sistem Informasi Perpuluhan & Persembahan GMAHK UIKT. Dirancang untuk transparansi, akuntabilitas, dan kemuliaan Tuhan.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Kontak</h4>
+      <p>GMAHK Uni Konferens Indonesia Kawasan Timur</p>
+      <p>support@flipus.org</p>
+    </div>
+    <div class="footer-col">
+      <h4>Tautan</h4>
+      <a href="#tentang">Tentang</a><br>
+      <a href="#fitur">Fitur</a><br>
+      <a href="/login">Masuk</a><br>
+      <a href="/register">Daftar</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2026 GMAHK UKIKT. All rights reserved.</span>
+    <span>v1.3 · build 2026.08</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="200" height="200">
+  <circle cx="50" cy="50" r="48" fill="#0F4C5C" stroke="#C9A961" stroke-width="3"/>
+  <text x="50" y="50" text-anchor="middle" dominant-baseline="central"
+        font-family="Georgia, serif" font-weight="700" font-size="40" fill="#C9A961">ST</text>
+  <text x="50" y="80" text-anchor="middle" font-family="Georgia, serif" font-size="9" fill="#C9A961" letter-spacing="1">GMAHK</text>
+</svg>

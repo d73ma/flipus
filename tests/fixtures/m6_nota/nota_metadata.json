@@ -1,0 +1,26 @@
+[
+  {
+    "filename": "nota_pln_250k.txt",
+    "expected_jumlah": 250000,
+    "expected_penerima": "PLN",
+    "expected_kategori_hint": "listrik",
+    "expected_is_rutin": true,
+    "description": "Nota PLN sederhana — listrik rutin"
+  },
+  {
+    "filename": "nota_pdam_180k.txt",
+    "expected_jumlah": 180000,
+    "expected_penerima": "PDAM",
+    "expected_kategori_hint": "air",
+    "expected_is_rutin": true,
+    "description": "Nota PDAM — air rutin"
+  },
+  {
+    "filename": "nota_telkom_200k.txt",
+    "expected_jumlah": 200000,
+    "expected_penerima": "Telkom",
+    "expected_kategori_hint": "telpon",
+    "expected_is_rutin": true,
+    "description": "Nota Telkom — telpon rutin"
+  }
+]

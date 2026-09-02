@@ -1,0 +1,11 @@
+========== TEST FIXTURE — NOTA TELKOM ==========
+Tanggal: 2026-09-01
+
+Telkom Indonesia
+Tagihan Telpon Bulan Agustus 2026
+
+No: 628124809145
+Total: Rp 200.000
+
+LUNAS
+==========================================

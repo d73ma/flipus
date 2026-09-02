@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sabbath-dark: #1B4332;
+    --sabbath-cream: #F5EFE0;
+    --sabbath-gold: #B8860B;
+    --sabbath-charcoal: #2D2A26;
+    --sabbath-light: #FAF9F5;
+  }
+  
+  body {
+    background-color: var(--sabbath-light);
+    color: var(--sabbath-charcoal);
+    font-family: 'Inter', system-ui, sans-serif;
+    line-height: 1.6;
+  }
+  
+  h1, h2, h3, h4 {
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+  }
+  
+  .sabbath-gold { color: #B8860B; }
+  .sabbath-dark { color: #1B4332; }
+}

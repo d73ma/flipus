@@ -1,0 +1,71 @@
+# FLIPUS — Root gitignore
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+.env.bak.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+flipus_local.db
+flipus_local.db-journal
+postgres_data/
+*.sql.gz
+
+# Logs
+*.log
+storage/logs/
+!storage/logs/.gitkeep
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Backups (security-sensitive!)
+storage/backups/
+*.tar.gz
+*.tar
+*.gpg
+
+# Storage runtime
+storage/ssl/
+storage/uploads/
+storage/scripts/*.bak
+/tmp/
+
+# Build artifacts
+frontend/dist/
+frontend/build/
+node_modules/
+
+# Audit logs (may contain sensitive PII traceability)
+storage/audit-dumps/

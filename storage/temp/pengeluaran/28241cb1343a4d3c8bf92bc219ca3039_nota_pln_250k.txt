@@ -1,0 +1,12 @@
+========== TEST FIXTURE — NOTA PLN ==========
+Tanggal: 2026-09-01
+
+PLN
+Tagihan Listrik Bulan Agustus 2026
+
+No Pelanggan: 123456789012
+Total Tagihan: Rp 250.000
+
+Status: LUNAS
+Terima Kasih
+==========================================

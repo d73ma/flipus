@@ -1,0 +1,8 @@
+vite
+react
+react-dom
+react-router-dom
+axios
+tailwindcss
+postcss
+autoprefixer

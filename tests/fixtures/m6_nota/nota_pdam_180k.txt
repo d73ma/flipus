@@ -1,0 +1,11 @@
+========== TEST FIXTURE — NOTA PDAM ==========
+Tanggal: 2026-09-01
+
+PDAM
+Tagihan Air Bulan Agustus 2026
+
+No Sambungan: 88001
+Total: Rp 180.000
+
+Status: LUNAS
+==========================================

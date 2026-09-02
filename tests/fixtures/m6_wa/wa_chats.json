@@ -1,0 +1,48 @@
+[
+  {
+    "name": "chat_rutin_listrik",
+    "description": "WA chat input Pengeluaran rutin (listrik). Expected: auto-approved.",
+    "sender": "628124809145",
+    "messages": [
+      {"role": "user", "text": "keluar", "expect_state": "P_AWAIT_NOMINAL"},
+      {"role": "user", "text": "250000", "expect_state": "P_AWAIT_PENERIMA"},
+      {"role": "user", "text": "PLN", "expect_state": "P_AWAIT_KATEGORI"},
+      {"role": "user", "text": "LIS", "expect_state": "P_CONFIRM"},
+      {"role": "user", "text": "ya", "expect_state": "P_SAVED", "expect_saved": {"nominal": 250000, "is_rutin": true, "status": "approved"}}
+    ]
+  },
+  {
+    "name": "chat_rutin_shortcut",
+    "description": "WA chat dengan nominal 250k + kategori by nomor urut. Rutin auto-approved.",
+    "sender": "628124809145",
+    "messages": [
+      {"role": "user", "text": "pengeluaran", "expect_state": "P_AWAIT_NOMINAL"},
+      {"role": "user", "text": "180k", "expect_state": "P_AWAIT_PENERIMA"},
+      {"role": "user", "text": "PDAM", "expect_state": "P_AWAIT_KATEGORI"},
+      {"role": "user", "text": "2", "expect_state": "P_CONFIRM"},
+      {"role": "user", "text": "ok", "expect_state": "P_SAVED", "expect_saved": {"nominal": 180000, "is_rutin": true, "status": "approved"}}
+    ]
+  },
+  {
+    "name": "chat_non_rutin_pending",
+    "description": "WA chat input Pengeluaran non-rutin (Pembangunan). Expected: pending_approval (tidak auto-approved).",
+    "sender": "628124809145",
+    "messages": [
+      {"role": "user", "text": "keluar", "expect_state": "P_AWAIT_NOMINAL"},
+      {"role": "user", "text": "1500000", "expect_state": "P_AWAIT_PENERIMA"},
+      {"role": "user", "text": "Toko Bangunan", "expect_state": "P_AWAIT_KATEGORI"},
+      {"role": "user", "text": "pembangunan", "expect_state": "P_CONFIRM"},
+      {"role": "user", "text": "ya", "expect_state": "P_SAVED", "expect_saved": {"nominal": 1500000, "is_rutin": false, "status": "pending_approval"}}
+    ]
+  },
+  {
+    "name": "chat_cancel",
+    "description": "WA chat yang di-cancel. Expected: tidak ada Pengeluaran tersimpan.",
+    "sender": "628124809145",
+    "messages": [
+      {"role": "user", "text": "keluar", "expect_state": "P_AWAIT_NOMINAL"},
+      {"role": "user", "text": "50000", "expect_state": "P_AWAIT_PENERIMA"},
+      {"role": "user", "text": "batal", "expect_state": "P_IDLE", "expect_saved": null}
+    ]
+  }
+]

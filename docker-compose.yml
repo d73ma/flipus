@@ -1,0 +1,95 @@
+"""
+FLIPUS v1.2 — Docker Compose untuk deployment production-grade.
+
+Services:
+- postgres: Database (optional, default SQLite di volume)
+- backend: FastAPI + uvicorn (4 workers)
+- frontend: Vite SPA via nginx (reverse proxy untuk /api)
+
+Usage:
+    cp .env.example .env  # lalu edit values
+    docker compose up -d
+    # Cek: http://localhost (frontend) atau http://localhost/api (backend)
+"""
+
+version: "3.9"
+
+services:
+  # ===== PostgreSQL (optional, uncomment untuk multi-user) =====
+  postgres:
+    image: postgres:15-alpine
+    container_name: flipus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flipus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flipus}
+      POSTGRES_DB: flipus
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flipus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: ["postgres"]  # Only start kalau --profile postgres
+
+  # ===== Backend FastAPI =====
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    container_name: flipus-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Default: SQLite (file di volume)
+      - DATABASE_URL_LOCAL=${DATABASE_URL_LOCAL:-sqlite:///./flipus_local.db}
+    volumes:
+      - flipus-data:/app/storage       # DB + uploads + backups
+      - flipus-logs:/app/logs          # Optional logs dir
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false  # Postgres optional
+
+  # ===== Frontend (nginx) =====
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    container_name: flipus-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  flipus-data:
+    name: flipus-data
+    driver: local
+  flipus-logs:
+    name: flipus-logs
+    driver: local
+  pgdata:
+    name: flipus-pgdata
+    driver: local
+
+networks:
+  default:
+    name: flipus-net
