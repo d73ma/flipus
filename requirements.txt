@@ -22,3 +22,8 @@ qrcode==7.4.2
 slowapi==0.1.9
 filetype==1.2.0
 limits[redis]==3.13.0
+
+# FASE 3 Sprint 4 — Developer tooling
+mypy==1.13.0
+pytest-cov==5.0.0
+ruff==0.7.4

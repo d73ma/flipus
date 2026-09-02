@@ -69,3 +69,7 @@ node_modules/
 
 # Audit logs (may contain sensitive PII traceability)
 storage/audit-dumps/
+
+# Type-check / lint caches (FASE 3 Sprint 4)
+.mypy_cache/
+.ruff_cache/

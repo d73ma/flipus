@@ -1,0 +1,101 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = [
+    ".venv",
+    ".venv.broken314",
+    "_docx_preview",
+    "_pdf_preview",
+    "_ppt_preview",
+    "storage",
+    "frontend",
+    "scripts/migrate_*",
+    "flipus_local.db*",
+]
+
+[tool.ruff.lint]
+# Pragmatic baseline — FASE 3 Sprint 4
+# Enables: pycodestyle (E/W), pyflakes (F), isort (I), bugbear (B),
+#          comprehensions (C4), security (S), print (T20)
+select = ["E", "W", "F", "I", "B", "C4", "S", "T20", "UP"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # do not perform function call in argument defaults — common FastAPI pattern
+    "S101",   # assert — used in tests
+    "S104",   # hardcoded bind to all interfaces — needed for LAN/dev
+    "S105",   # possible hardcoded password — false positives on key names
+    "S106",   # possible hardcoded password — false positives
+    "S301",   # pickle — only used in trusted local scripts if any
+    "S311",   # pseudo-random — non-crypto
+    "S324",   # insecure hash — bcrypt used elsewhere
+    "UP015",  # unnecessary open mode param — non-issue
+    "UP032",  # use f-string instead of format — non-issue
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "B011"]
+"scripts/**/*.py" = ["T201", "S101", "S105"]
+"app/core/logging_config.py" = ["T201"]  # formatter emits via logging, not print
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.mypy]
+# FASE 3 Sprint 4 baseline — pragmatic, not strict
+python_version = "3.11"
+mypy_path = "app"
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+disallow_untyped_defs = false           # gradual: not required in defs
+disallow_incomplete_defs = false        # gradual
+check_untyped_defs = false              # gradual
+no_implicit_reexport = false            # gradual
+strict_optional = true                  # only this one is strict
+show_error_codes = true
+show_column_numbers = true
+pretty = true
+color_output = true
+exclude = [
+    ".venv",
+    ".venv.broken314",
+    "frontend",
+    "scripts/migrate_",
+    "storage",
+    "tests/",
+    "docs/",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/main.py",                # FastAPI bootstrap, exercised by integration
+    "app/seed.py",
+    "app/db/*_init.py",
+    "app/migrations/*",
+]
+data_file = ".coverage"
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "pass",
+    "\\.\\.\\.",
+]
+
+[tool.pytest.ini_options]
+# FASE 3 Sprint 4: constrain discovery to tests/ to avoid collecting
+# ad-hoc scripts in scripts/ and storage/scripts/ that lack fixtures.
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra"
