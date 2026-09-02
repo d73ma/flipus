@@ -112,17 +112,46 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
     )
 
 
+# FASE 3-S3.S1 — startup logger (JSONFormatter handles output).
+# Defined BEFORE CORS block supaya CORS log bisa di-emit.
+import logging as _logging_startup
+_startup_log = _logging_startup.getLogger("app.startup")
+
+# FASE 3-S3.S3 — CORS origins fully env-driven via ALLOWED_ORIGINS.
+# Empty entries / whitespace di-strip. Kalau kosong total, fallback ke localhost dev.
+# LAN origins (192.168.x.x, 10.x.x.x, 172.16-31.x.x) auto-allowed via regex di bawah
+# untuk demo offline multi-device di Wi-Fi yang sama (private range aman).
+_allowed_origins = [
+    o.strip() for o in (settings.ALLOWED_ORIGINS or "").split(",") if o.strip()
+] or ["http://localhost:5173"]
+
+# Hard guard: tolak wildcard origin kalau credentials=True (CORS spec violation).
+# Starlette silently drops it, which menyembunyikan bug. Log warning di startup.
+if "*" in _allowed_origins:
+    _startup_log.warning(
+        "cors_wildcard_with_credentials origin=* rejected spec=CORS_RFC6454 credentials_incompatible"
+    )
+    _allowed_origins = [o for o in _allowed_origins if o != "*"]
+
+_startup_log.info(
+    "cors_configured origins_count=%d methods=%s headers=%s expose=%s",
+    len(_allowed_origins),
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "Authorization,Content-Type,X-Admin-Token,X-Request-ID",
+    "X-Request-ID",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()
-    ] or ["http://localhost:5173"],
-    # LAN origins (192.168.x.x, 10.x.x.x, 172.16-31.x.x) — untuk demo offline
-    # multi-device di Wi-Fi yang sama. Hardcoded hostnames aman karena private range.
+    allow_origins=_allowed_origins,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Admin-Token"],
+    # X-Request-ID: client bisa set custom request ID (correlation), server echoes back
+    # via expose_headers. Frontend error reporting bisa attach X-Request-ID untuk trace
+    # ke log backend.
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Token", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
@@ -148,10 +177,6 @@ app.include_router(pengeluaran_ocr.router, prefix="/api/v1", tags=["Pengeluaran 
 app.include_router(pengeluaran_wa.router, prefix="/api/v1", tags=["Pengeluaran WA Bot (v2.0 M6)"])
 app.include_router(laporan_gabungan.router, prefix="/api/v1", tags=["Laporan Gabungan (v2.0 M7)"])
 app.include_router(m8_managed.router, prefix="/api/v1", tags=["Managed Users + Void (v2.0 M8)"])
-
-# FASE 3-S3.S1 — startup logger (JSONFormatter handles output).
-import logging as _logging_startup
-_startup_log = _logging_startup.getLogger("app.startup")
 
 # === Static files (logos jemaat untuk landing page) ===
 # Folder: storage/logos/*.svg (dibuat otomatis oleh seed_demo.py)
