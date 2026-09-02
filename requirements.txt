@@ -17,3 +17,8 @@ reportlab==4.2.5
 openpyxl==3.1.5
 pyotp==2.9.0
 qrcode==7.4.2
+
+# FASE 3 Sprint 1: Rate limiting + file validation
+slowapi==0.1.9
+filetype==1.2.0
+limits[redis]==3.13.0

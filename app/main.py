@@ -1,9 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import os
 
+from slowapi.errors import RateLimitExceeded
+
 from app.core.config import settings
+from app.core.rate_limiter import limiter as _rate_limiter
 
 from app.api.v1 import auth, onboarding, scanner, reports, sync, dashboard, register, master, users, admin, agregat, tenants, kuitansi, twofa, notifications, demo, wa_input, quick_input, pengeluaran, pengeluaran_ocr, pengeluaran_wa, laporan_gabungan, m8_managed
 
@@ -76,6 +80,24 @@ Uni Konferens Indonesia Kawasan Timur (UKIKT).
         "showExtensions": True,
     },
 )
+
+# FASE 3 Sprint 1: slowapi rate limiter (K1, K2)
+# Attach limiter ke app.state agar decorator @limiter.limit() bisa akses via state.limiter.
+app.state.limiter = _rate_limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Handler 429 ketika rate limit tercapai. Mengembalikan JSON yang konsisten."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": f"Rate limit exceeded: {exc.detail}",
+            "error": "rate_limit_exceeded",
+        },
+        headers={"Retry-After": str(getattr(exc, "retry_after", 60))},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,

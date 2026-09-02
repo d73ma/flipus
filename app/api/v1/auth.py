@@ -21,6 +21,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.core.rate_limiter import limiter as _rate_limiter
 from app.models.user import User
 from app.models.tenant import Tenant
 from app.models.audit import AuditLog
@@ -332,7 +333,8 @@ def require_roles(*roles: str):
 
 
 @router.post("/login")
-def login(data: LoginIn, db: Session = Depends(get_db)):
+@_rate_limiter.limit("10/minute")  # FASE 3 K1: anti-brute-force per-IP
+def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
     """
     Login dengan optional tenant_slug (Tahap 20) + optional TOTP (Tahap 23)
     + login lockout (v1.4 hardening).
@@ -544,6 +546,7 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordOut)
+@_rate_limiter.limit("3/minute")  # FASE 3 K1: anti-enumeration per-IP
 def forgot_password(
     data: ForgotPasswordIn,
     request: Request,
@@ -567,33 +570,10 @@ def forgot_password(
     if not identifier:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Identifier kosong")
 
-    # T78: Rate-limit per IP untuk cegah username enumeration.
-    # In-memory dict (process-local). Untuk multi-worker production, replace dengan Redis.
+    # T78 (diganti FASE 3 K1): Rate-limit per IP untuk cegah username enumeration.
+    # Sebelumnya pakai in-memory dict (process-local). Sekarang slowapi @limiter.limit("3/minute")
+    # di atas yang handle — Redis-ready jika pindah ke multi-worker (lihat app/core/rate_limiter.py).
     client_ip = request.client.host if request.client else "unknown"
-    fp_window = getattr(forgot_password, "_ip_window", None)
-    if fp_window is None:
-        fp_window = {}
-        setattr(forgot_password, "_ip_window", fp_window)
-    now_ts = utcnow().timestamp()
-    # Bersihkan entry > 5 menit
-    cutoff_ts = now_ts - 300
-    fp_window = {ip: ts for ip, ts in fp_window.items() if ts > cutoff_ts}
-    setattr(forgot_password, "_ip_window", fp_window)
-    ip_count = sum(1 for ts in fp_window.values() if ts > now_ts - 60)  # max 5 per menit
-    if ip_count >= 5:
-        # Audit
-        db.add(AuditLog(
-            tenant_id=0,
-            action=f"FORGOT_PASSWORD_IP_RATE_LIMIT_ip_{client_ip}_count_{ip_count}",
-            payload_hash=identifier[:32],
-        ))
-        db.commit()
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "Terlalu banyak percobaan dari IP Anda. Coba lagi dalam 1 menit.",
-        )
-    fp_window[client_ip] = now_ts
-    setattr(forgot_password, "_ip_window", fp_window)
 
     # Tahap 20 SaaS: resolve tenant_slug kalau ada
     target_tenant_id = None
