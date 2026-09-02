@@ -120,7 +120,8 @@ def generate_gabungan_pdf(
             sum_khusus += k.khusus_angka or 0
             sum_misi += k.porsi_kantor_misi or 0
             sum_jemaat += k.porsi_kas_jemaat or 0
-        total_penerimaan = sum_x + sum_pt
+        # FASE 2 S1/R2: konservasi uang — khusus harus masuk total
+        total_penerimaan = sum_x + sum_pt + sum_khusus
         data_k.append([
             "", "TOTAL", f"{sum_x:,}", f"{sum_pt:,}", f"{sum_khusus:,}",
             f"{total_penerimaan:,}", f"{sum_misi:,}", f"{sum_jemaat:,}",
