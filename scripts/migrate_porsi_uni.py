@@ -31,17 +31,25 @@ def ensure_columns():
     """ALTER TABLE kalau kolom belum ada (SQLite-safe)."""
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("kuitansi")}
-    new_cols = ["porsi_x_uni", "porsi_pt_uni", "porsi_khusus_uni"]
-    missing = [c for c in new_cols if c not in cols]
-    if not missing:
+    bigint_cols = ["porsi_x_uni", "porsi_pt_uni", "porsi_khusus_uni"]
+    datetime_cols = ["porsi_recomputed_at"]  # FASE 2 S6/R5: tracking recompute timestamp
+    missing_bigint = [c for c in bigint_cols if c not in cols]
+    missing_dt = [c for c in datetime_cols if c not in cols]
+    if not missing_bigint and not missing_dt:
         print(f"[migrate-porsi-uni] Semua kolom sudah ada. Skip ALTER.")
         return
     with engine.begin() as conn:
-        for col in missing:
+        for col in missing_bigint:
             sql = f"ALTER TABLE kuitansi ADD COLUMN {col} BIGINT DEFAULT 0 NOT NULL"
             print(f"[migrate-porsi-uni] {sql}")
             conn.execute(text(sql))
-    print(f"[migrate-porsi-uni] ✓ {len(missing)} kolom ditambahkan.")
+        for col in missing_dt:
+            # SQLite + PostgreSQL: DATETIME NULL default. Tidak ada DEFAULT karena nullable.
+            sql = f"ALTER TABLE kuitansi ADD COLUMN {col} DATETIME"
+            print(f"[migrate-porsi-uni] {sql}")
+            conn.execute(text(sql))
+    added = len(missing_bigint) + len(missing_dt)
+    print(f"[migrate-porsi-uni] ✓ {added} kolom ditambahkan.")
 
 
 def _resolve_config(db, tenant):

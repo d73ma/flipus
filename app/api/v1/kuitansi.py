@@ -22,7 +22,7 @@ RBAC:
 
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -36,8 +36,10 @@ from app.api.v1.auth import get_current_user
 from app.core.security import decrypt_pii
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni
+from app.models.master import MisiKonferens, Uni, PersentaseConfig
 from app.models.audit import AuditLog
+# FASE 2 S6/R5: recompute single pakai Jerry Model B (single source of truth).
+from app.utils.porsi_calculator import compute_porsi
 
 router = APIRouter()
 
@@ -1083,4 +1085,196 @@ def _export_pdf(
         iter([pdf_bytes]),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ===== FASE 2 S6/R5: Single-Kuitansi Recompute =====
+
+class RecomputePorsiSingleOut(BaseModel):
+    """Schema response untuk POST /kuitansi/{id}/recompute-porsi (single).
+
+    Single source of truth policy (R5):
+    - Stored snapshot di kuitansi adalah immutable per kuitansi (audit-friendly).
+    - Endpoint ini untuk override: kalau Auditor/Admin yakin PersentaseConfig sudah benar
+      dan ingin apply ke satu kuitansi spesifik (misal: koreksi manual satu data).
+    - Setiap recompute menulis ke audit_logs dengan before/after/config_snapshot
+      agar bisa di-trace 100% kenapa porsi berubah dari nilai awalnya.
+    """
+    status: str
+    kuitansi_id: int
+    nomor_kuitansi: str
+    before: dict
+    after: dict
+    changed: bool
+    porsi_recomputed_at: str
+    config_snapshot: dict
+    audit_log_id: int
+
+
+@router.post("/{kuitansi_id}/recompute-porsi", response_model=RecomputePorsiSingleOut)
+def recompute_porsi_single(
+    kuitansi_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    FASE 2 S6/R5: Recompute porsi untuk SATU kuitansi.
+
+    Path: POST /api/v1/kuitansi/{kuitansi_id}/recompute-porsi
+
+    RBAC:
+    - ADMIN_UNI: boleh recompute kuitansi di seluruh uni-nya.
+    - AUDITOR_MISI: boleh recompute kuitansi di misi-nya saja.
+    - BENDAHARA / KETUA_KEUANGAN / PENDETA: DILARANG (cukup lihat stored snapshot).
+
+    Catatan:
+    - Endpoint ini HARUS idempotent: kalau dipanggil 2x dengan config sama,
+      nilai before/after akan sama (changed=False), jadi tidak merusak data.
+    - Field porsi_recomputed_at di-update ke waktu UTC sekarang setelah recompute.
+    - Audit log immutable (append-only) — tidak pernah di-update atau dihapus.
+    """
+    if current_user["role"] not in ("ADMIN_UNI", "AUDITOR_MISI"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Recompute single hanya untuk ADMIN_UNI / AUDITOR_MISI",
+        )
+
+    k = db.query(Kuitansi).filter(Kuitansi.id == kuitansi_id).first()
+    if not k:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Kuitansi #{kuitansi_id} tidak ditemukan")
+    if k.is_purged:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kuitansi sudah di-purge, tidak bisa di-recompute")
+
+    # RBAC scope check: ADMIN_UNI = seluruh uni, AUDITOR_MISI = misi-nya saja
+    tenant = db.query(Tenant).filter(Tenant.id == k.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tenant kuitansi tidak valid")
+
+    caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
+    if current_user["role"] == "ADMIN_UNI":
+        if not caller or not caller.nama_uni or tenant.nama_uni != caller.nama_uni:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Kuitansi ini di luar Uni Anda",
+            )
+    elif current_user["role"] == "AUDITOR_MISI":
+        if not tenant.misi_konferens_id or tenant.misi_konferens_id != caller.misi_konferens_id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Kuitansi ini di luar Misi Anda",
+            )
+
+    # Ambil PersentaseConfig MISI scope (single source of truth config)
+    cfg_row = (
+        db.query(PersentaseConfig)
+        .filter(
+            PersentaseConfig.scope == "MISI",
+            PersentaseConfig.ref_id == tenant.misi_konferens_id,
+        )
+        .first()
+    )
+    if not cfg_row:
+        # SDA doctrine defaults
+        cfg_x, cfg_pt, cfg_kh = 0.0, 0.5, 0.5
+        cfg_xu, cfg_ptu, cfg_khu = 0.0, 0.0, 0.0
+        cfg_source = "SDA_DOCTRINE_DEFAULT"
+        config_id = None
+    else:
+        cfg_x = cfg_row.pct_x_jemaat
+        cfg_pt = cfg_row.pct_pt_jemaat
+        cfg_kh = cfg_row.pct_khusus_jemaat
+        cfg_xu = cfg_row.pct_x_uni
+        cfg_ptu = cfg_row.pct_pt_uni
+        cfg_khu = cfg_row.pct_khusus_uni
+        cfg_source = f"PersentaseConfig.id={cfg_row.id}"
+        config_id = cfg_row.id
+
+    # Snapshot BEFORE
+    before = {
+        "porsi_kantor_misi": k.porsi_kantor_misi or 0,
+        "porsi_kas_jemaat": k.porsi_kas_jemaat or 0,
+        "porsi_khusus_misi": k.porsi_khusus_misi or 0,
+        "porsi_khusus_jemaat": k.porsi_khusus_jemaat or 0,
+        "porsi_x_uni": k.porsi_x_uni or 0,
+        "porsi_pt_uni": k.porsi_pt_uni or 0,
+        "porsi_khusus_uni": k.porsi_khusus_uni or 0,
+    }
+
+    # Hitung ulang pakai Jerry Model B (compute_porsi)
+    porsi = compute_porsi(
+        x=k.perpuluhan_x_angka or 0,
+        pt=k.pt_angka or 0,
+        kh=k.khusus_angka or 0,
+        pct_x_jemaat=cfg_x,
+        pct_pt_jemaat=cfg_pt,
+        pct_khusus_jemaat=cfg_kh,
+        pct_x_uni=cfg_xu,
+        pct_pt_uni=cfg_ptu,
+        pct_khusus_uni=cfg_khu,
+    )
+
+    new_kantor_misi = porsi["pm_x"] + porsi["pm_pt"] + porsi["pm_kh"]
+    new_kas_jemaat = porsi["pj_x"] + porsi["pj_pt"] + porsi["pj_kh"]
+
+    # Tulis ke DB (snapshot override)
+    k.porsi_kantor_misi = new_kantor_misi
+    k.porsi_kas_jemaat = new_kas_jemaat
+    k.porsi_khusus_misi = porsi["pm_kh"]
+    k.porsi_khusus_jemaat = porsi["pj_kh"]
+    k.porsi_x_uni = porsi["pu_x"]
+    k.porsi_pt_uni = porsi["pu_pt"]
+    k.porsi_khusus_uni = porsi["pu_kh"]
+    k.porsi_recomputed_at = datetime.now(timezone.utc)
+
+    # Snapshot AFTER
+    after = {
+        "porsi_kantor_misi": k.porsi_kantor_misi,
+        "porsi_kas_jemaat": k.porsi_kas_jemaat,
+        "porsi_khusus_misi": k.porsi_khusus_misi,
+        "porsi_khusus_jemaat": k.porsi_khusus_jemaat,
+        "porsi_x_uni": k.porsi_x_uni,
+        "porsi_pt_uni": k.porsi_pt_uni,
+        "porsi_khusus_uni": k.porsi_khusus_uni,
+    }
+    changed = before != after
+
+    # Audit log (immutable, append-only) — FASE 2 S6/R5
+    audit = AuditLog(
+        tenant_id=k.tenant_id,
+        id_rekap_mingguan=k.id_rekap_mingguan,
+        nomor_kuitansi_token=k.nomor_kuitansi,
+        action="recompute_porsi_single",
+        porsi_dana_misi=new_kantor_misi,
+        payload_hash=(
+            f"kuitansi_id={kuitansi_id}|user_id={current_user['id']}|"
+            f"role={current_user['role']}|"
+            f"before={before}|after={after}|"
+            f"config_source={cfg_source}|config_id={config_id}|"
+            f"pct_x_j={cfg_x},pct_pt_j={cfg_pt},pct_kh_j={cfg_kh},"
+            f"pct_x_u={cfg_xu},pct_pt_u={cfg_ptu},pct_kh_u={cfg_khu}|"
+            f"changed={changed}"
+        ),
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(audit)
+
+    return RecomputePorsiSingleOut(
+        status="ok",
+        kuitansi_id=k.id,
+        nomor_kuitansi=k.nomor_kuitansi,
+        before=before,
+        after=after,
+        changed=changed,
+        porsi_recomputed_at=k.porsi_recomputed_at.isoformat(),
+        config_snapshot={
+            "source": cfg_source,
+            "pct_x_jemaat": cfg_x,
+            "pct_pt_jemaat": cfg_pt,
+            "pct_khusus_jemaat": cfg_kh,
+            "pct_x_uni": cfg_xu,
+            "pct_pt_uni": cfg_ptu,
+            "pct_khusus_uni": cfg_khu,
+        },
+        audit_log_id=audit.id,
     )

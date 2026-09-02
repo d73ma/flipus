@@ -12,6 +12,7 @@ Endpoint manual untuk testing / recovery:
 """
 
 from typing import List, Optional
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -32,6 +33,11 @@ from app.services.notification_service import create_notification, EventType
 from app.services.whatsapp import get_device_status
 
 router = APIRouter()
+
+
+def _now() -> datetime:
+    """FASE 2 S6/R5: helper UTC timestamp untuk porsi_recomputed_at & audit logs."""
+    return datetime.now(timezone.utc)
 
 
 # ===== Fonnte Device Status (v1.5-F) =====
@@ -442,13 +448,36 @@ def recompute_porsi_all(
             k.porsi_x_uni = porsi["pu_x"]
             k.porsi_pt_uni = porsi["pu_pt"]
             k.porsi_khusus_uni = porsi["pu_kh"]
+            # FASE 2 S6/R5: timestamp recompute + audit log per-kuitansi (sebelum commit)
+            k.porsi_recomputed_at = _now()
             if old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat:
                 updated += 1
+            # Audit log per-kuitansi (untuk trace before/after snapshot)
+            db.add(AuditLog(
+                tenant_id=tid,
+                id_rekap_mingguan=k.id_rekap_mingguan,
+                nomor_kuitansi_token=k.nomor_kuitansi,
+                action="recompute_porsi",
+                porsi_dana_misi=new_kantor_misi,
+                payload_hash=(
+                    f"user={current_user['id']}|"
+                    f"old_misi={old_misi}|old_jemaat={old_jemaat}|"
+                    f"new_misi={new_kantor_misi}|new_jemaat={new_kas_jemaat}|"
+                    f"cfg=pct_x_j={cfg_x},pct_pt_j={cfg_pt},pct_kh_j={cfg_kh},"
+                    f"pct_x_u={cfg_xu},pct_pt_u={cfg_ptu},pct_kh_u={cfg_khu}|"
+                    f"changed={old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat}"
+                ),
+            ))
 
+    # FASE 2 S6/R5: per-kuitansi audit log sudah ditulis di dalam loop.
+    # Summary batch log tetap dicatat agar mudah difilter di AuditLog page.
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
-        action=f"RECOMPUTE_PORSI_by_user_{current_user['id']}_tenants_{tenant_ids}",
-        payload_hash=f"processed={processed},updated={updated}",
+        action=f"RECOMPUTE_PORSI_BATCH_user_{current_user['id']}",
+        payload_hash=(
+            f"batch|processed={processed}|updated={updated}|"
+            f"tenants={tenant_ids}"
+        ),
     ))
     db.commit()
 
@@ -456,89 +485,9 @@ def recompute_porsi_all(
         status="ok",
         kuitansi_processed=processed,
         kuitansi_updated=updated,
-        note=f"Recompute selesai. {updated} dari {processed} kuitansi ter-update.",
-    )
-
-
-# ===== Audit Logs =====
-
-class AuditLogOut(BaseModel):
-    id: int
-    tenant_id: int
-    action: str
-    payload_hash: Optional[str] = None
-    porsi_dana_misi: int = 0
-    id_rekap_mingguan: Optional[str] = None
-    created_at: str
-
-
-class AuditLogsOut(BaseModel):
-    logs: List[AuditLogOut]
-    count: int
-    page: int
-    per_page: int
-
-
-@router.get("/audit-logs", response_model=AuditLogsOut)
-def list_audit_logs(
-    page: int = 1,
-    per_page: int = 50,
-    action_like: Optional[str] = None,
-    tenant_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    List audit logs dengan pagination & filter.
-
-    Args:
-        page: page number (default 1)
-        per_page: items per page (default 50, max 200)
-        action_like: substring filter untuk action (e.g., "BLAST", "REGISTER")
-        tenant_id: filter by specific tenant (default: all)
-
-    RBAC: ADMIN_UNI only.
-    """
-    if current_user["role"] != "ADMIN_UNI":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni (Jerry)")
-
-    if per_page > 200:
-        per_page = 200
-    if per_page < 1:
-        per_page = 50
-    if page < 1:
-        page = 1
-
-    q = db.query(AuditLog)
-    if action_like:
-        q = q.filter(AuditLog.action.like(f"%{action_like}%"))
-    if tenant_id is not None:
-        q = q.filter(AuditLog.tenant_id == tenant_id)
-
-    total = q.count()
-    logs = (
-        q.order_by(AuditLog.id.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-        .all()
-    )
-
-    items = []
-    for l in logs:
-        items.append(AuditLogOut(
-            id=l.id,
-            tenant_id=l.tenant_id,
-            action=l.action or "UNKNOWN",
-            payload_hash=l.payload_hash,
-            porsi_dana_misi=l.porsi_dana_misi or 0,
-            id_rekap_mingguan=l.id_rekap_mingguan,
-            created_at=l.created_at.isoformat() if l.created_at else "",
-        ))
-
-    return AuditLogsOut(
-        logs=items,
-        count=total,
-        page=page,
-        per_page=per_page,
+        note=(
+            f"Recompute selesai. {updated} dari {processed} kuitansi ter-update. "
+            f"Audit log per-kuitansi sudah dicatat."
+        ),
     )
 

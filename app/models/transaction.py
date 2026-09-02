@@ -51,6 +51,12 @@ class Kuitansi(Base):
     porsi_pt_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
     porsi_khusus_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
 
+    # FASE 2 S6/R5: tracking kapan porsi terakhir di-recompute (single atau batch).
+    # NULL = belum pernah di-recompute (compute awal saat create kuitansi via dashboard.py).
+    # Berguna untuk audit: "kapan porsi ini berubah dari nilai awalnya?"
+    # Jangan bingung dengan created_at — created_at = waktu input, porsi_recomputed_at = waktu hitung ulang.
+    porsi_recomputed_at = Column(DateTime, nullable=True, index=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     # T23-1: Approval Workflow
