@@ -1,12 +1,15 @@
 import os
 import uuid
 import shutil
+import random
+import time
 from datetime import datetime
 from app.core.security import utcnow
 from typing import List, Optional
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai_engine.batch_processor import process_batch
@@ -305,10 +308,56 @@ def save_ocr_batch(
             porsi_khusus_misi=pm_kh,
             porsi_khusus_jemaat=pj_kh + pu_kh,  # KH share jemaat + uni (Model A)
         )
+        # T5 (FASE 3 Sprint 1): race-condition guard dengan SAVEPOINT per item.
+        # Loop inner sebelumnya hanya cek "stale read" (existing.first()),
+        # tapi tidak catch IntegrityError dari UNIQUE constraint pada
+        # nomor_kuitansi saat insert. Antara existing.first() dan db.flush()
+        # request paralel bisa menyisipkan nomor yang sama. Solusi: SAVEPOINT
+        # per item — kalau IntegrityError, rollback HANYA savepoint (item ini),
+        # bukan seluruh transaksi batch. Item lain yang sudah insert tetap aman.
+        # Bounded retry (5x) + jitter 10-50ms untuk kurangi thundering herd.
+        _insert_attempts = 0
+        _sp = db.begin_nested()  # SAVEPOINT per item
         try:
-            db.add(k)
-            db.flush()
+            while True:
+                try:
+                    db.add(k)
+                    db.flush()
+                    _sp.commit()  # release savepoint
+                    break  # sukses insert, lanjut item berikutnya
+                except IntegrityError as _ie:
+                    # Rollback HANYA savepoint (item ini), bukan transaksi utama.
+                    _sp.rollback()
+                    _insert_attempts += 1
+                    if _insert_attempts > 5:
+                        import sys as _sys, traceback as _tb
+                        print(f"[OCR] IntegrityError retry exhausted (5x) for item idx={i}: {_ie}\n{_tb.format_exc()}", file=_sys.stderr)
+                        raise HTTPException(
+                            status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Server sibuk memproses kuitansi paralel. Silakan coba ulang dalam beberapa detik.",
+                        )
+                    # Increment urutan + jitter (10-50ms) untuk kurangi contention.
+                    urutan += 1
+                    base_count = urutan  # update untuk item berikutnya
+                    # Re-generate nomor dengan urutan baru.
+                    try:
+                        nomor = generate_nomor_kuitansi(
+                            urutan=urutan,
+                            initial_jemaat=tenant.initial_jemaat or "XX",
+                            tanggal=datetime.fromisoformat(tanggal_sabat),
+                        )
+                    except Exception:
+                        nomor = f"KPT-{utcnow().strftime('%Y%m%d%H%M%S')}-{urutan}"
+                    k.nomor_kuitansi = nomor
+                    k.id = None  # reset supaya tidak konflik PK setelah rollback
+                    _sp = db.begin_nested()  # buka savepoint baru
+                    time.sleep(0.01 + random.random() * 0.04)
+                    continue
         except Exception as e:
+            try:
+                _sp.rollback()
+            except Exception:
+                pass
             import sys as _sys, traceback as _tb
             print(f"[OCR] db insert failed: {e}\n{_tb.format_exc()}", file=_sys.stderr)
             db.rollback()
