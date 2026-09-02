@@ -172,21 +172,41 @@ def create_kuitansi(
         # Fallback kalau format gagal
         nomor_kuitansi = f"KPT-{utcnow().strftime('%Y%m%d%H%M%S')}-{urutan}"
 
-    # Hitung porsi
+    # Hitung porsi — FASE 2 S2/R1: pakai Jerry Model B (compute_porsi)
+    # Single source of truth — semua call site harus pakai fungsi ini.
     pct = _get_persentase_for_tenant(db, tenant)
     total_x = payload.perpuluhan_x_angka
     total_pt = payload.pt_angka
     total_khusus = payload.khusus_angka
     total_pemberian = total_x + total_pt + total_khusus
 
-    porsi_x_misi = int(total_x * pct["pct_x_jemaat"])
-    porsi_pt_misi = int(total_pt * pct["pct_pt_jemaat"])
-    porsi_pt_jemaat = total_pt - porsi_pt_misi
-    porsi_khusus_misi = int(total_khusus * pct["pct_khusus_jemaat"])
-    porsi_khusus_jemaat = total_khusus - porsi_khusus_misi
+    from app.utils.porsi_calculator import compute_porsi
 
-    porsi_kantor_misi = porsi_x_misi + porsi_pt_misi
-    porsi_kas_jemaat = porsi_pt_jemaat + porsi_khusus_jemaat
+    _porsi = compute_porsi(
+        x=total_x,
+        pt=total_pt,
+        kh=total_khusus,
+        pct_x_jemaat=pct["pct_x_jemaat"],
+        pct_pt_jemaat=pct["pct_pt_jemaat"],
+        pct_khusus_jemaat=pct["pct_khusus_jemaat"],
+        pct_x_uni=pct["pct_x_uni"],
+        pct_pt_uni=pct["pct_pt_uni"],
+        pct_khusus_uni=pct["pct_khusus_uni"],
+    )
+
+    # Field yang disimpan di Kuitansi (4 kolom existing):
+    #   porsi_kantor_misi  = total ke Misi (X + PT + KH ke Misi)
+    #   porsi_kas_jemaat   = total ke Jemaat (X + PT + KH ke Jemaat)
+    #   porsi_khusus_misi  = porsi KH yg ke Misi
+    #   porsi_khusus_jemaat= porsi KH yg ke Jemaat
+    porsi_kantor_misi = _porsi["pm_x"] + _porsi["pm_pt"] + _porsi["pm_kh"]
+    porsi_kas_jemaat = _porsi["pj_x"] + _porsi["pj_pt"] + _porsi["pj_kh"]
+    porsi_khusus_misi = _porsi["pm_kh"]
+    porsi_khusus_jemaat = _porsi["pj_kh"]
+    # porsi_uni tidak disimpan di model Kuitansi existing — FASE 2 S5/R4 akan tambah kolom
+    porsi_x_uni = _porsi["pu_x"]
+    porsi_pt_uni = _porsi["pu_pt"]
+    porsi_khusus_uni = _porsi["pu_kh"]
 
     # Encrypt PII
     nama_encrypted = encrypt_pii(payload.nama_umat) if payload.nama_umat else None
