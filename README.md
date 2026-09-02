@@ -576,3 +576,39 @@ UKIKT Internal — All rights reserved.
 
 **Jerry Mauri** — FLIPUS Lead
 WhatsApp: 6285750113010
+
+---
+
+## 📚 Dokumentasi
+
+Dokumentasi lengkap FLIPUS terorganisir dalam beberapa file:
+
+| Dokumen | Isi | Untuk siapa |
+|---|---|---|
+| [`README.md`](README.md) | Overview, quick start, arsitektur | Semua orang (entry point) |
+| [`docs/API.md`](docs/API.md) | Referensi 104 endpoint API + 39 OpenAPI tags | Frontend dev, integrasi |
+| [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) | Panduan pengguna (deprecated — lihat README) | Bendahara, admin jemaat |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model, PII encryption, secret rotation, incident response | Sysadmin, security reviewer |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Install, deploy, backup, monitoring, troubleshooting | Sysadmin, DevOps, on-call |
+| [`docs/TESTING.md`](docs/TESTING.md) | Test suite (166 test), coverage breakdown, cara menulis test | Developer, QA |
+| [`ARCHITECTURE_MAP.md`](ARCHITECTURE_MAP.md) | High-level architecture, dependency graph | Developer, arsitek |
+| [`CHANGELOG.md`](CHANGELOG.md) | Riwayat perubahan per versi | Semua |
+| [`FASE2_VALIDASI_AKUNTANSI.md`](FASE2_VALIDASI_AKUNTANSI.md) | Hasil audit accounting integrity per tenant | Auditor, pendeta |
+| [`FASE3_AUDIT_BUG_SECURITY.md`](FASE3_AUDIT_BUG_SECURITY.md) | Bug & security findings FASE 3 | Developer, security |
+| [`FASE3_SPRINT1_SUMMARY.md`](FASE3_SPRINT1_SUMMARY.md) | Ringkasan sprint 1-4 FASE 3 | Project manager, lead |
+| [`storage/SECURITY_PROCEDURES.md`](storage/SECURITY_PROCEDURES.md) | Prosedur rotasi secret key detail | Sysadmin |
+| [`tests/TESTS.md`](tests/TESTS.md) | Coverage matrix historis per tahap | Developer |
+
+### Development Tools (S4-A)
+
+```bash
+make help          # lihat semua target
+make test          # jalankan 166 test
+make test-cov      # + coverage report
+make coverage      # HTML report ke htmlcov/
+make lint          # ruff linter
+make lint-fix      # ruff + auto-fix
+make typecheck     # mypy gradual
+make clean         # hapus cache
+```
+

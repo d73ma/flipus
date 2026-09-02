@@ -1,0 +1,471 @@
+# FLIPUS — Testing Guide
+
+> **Version**: 2.0 (FASE 3 Sprint 4 — Consolidated Testing Documentation)
+> **Scope**: test suite overview, cara run, coverage breakdown, CI integration
+> **Audience**: developer, QA, DevOps
+> **Lihat juga**: [`tests/TESTS.md`](../../tests/TESTS.md) untuk coverage matrix historis
+
+---
+
+## 1. Ringkasan
+
+| Statistik | Nilai |
+|---|---|
+| Total test | **166** |
+| Total file test | 10 |
+| Framework | pytest 8+ |
+| Async | pytest-asyncio |
+| Coverage tool | pytest-cov 5.0+ |
+| Line coverage (baseline) | **45.3%** (target S4-F: ≥70%) |
+| Test DB | SQLite in-memory (`sqlite:///:memory:`) |
+| Status | ✅ **166/166 PASS** dalam ~114 detik |
+
+---
+
+## 2. Struktur Test
+
+```
+tests/
+├── conftest.py                       # fixtures: db, client, auth, users
+├── test_accounting_integrity.py      # 29 test — FASE 2 audit (porsi recompute, balance)
+├── test_tenant_saas.py               # 21 test — Tahap 20 multi-tenant isolation
+├── test_t33_jwt_refresh.py           # 21 test — Tahap 33 JWT + refresh rotation
+├── test_t23_approval_2fa.py          # 19 test — Tahap 23 approval workflow + 2FA
+├── test_branding.py                  # 18 test — Tahap 21 white-label branding
+├── test_t24_notifications.py         # 14 test — Tahap 24 notification center
+├── test_t31_logging.py               # 13 test — Tahap 31 structured logging + audit
+├── test_t32_cors.py                  # 12 test — Tahap 32 CORS hardening
+├── test_t22_search_export.py         # 11 test — Tahap 22 advanced search & export
+└── test_t25_e2e.py                   # 8 test  — Tahap 25 end-to-end happy paths
+```
+
+**Total per file** (sorted by count):
+
+| # | Test | File | Domain |
+|---|---|---:|---|
+| 1 | 29 | `test_accounting_integrity.py` | Accounting rules (FASE 2) |
+| 2 | 21 | `test_tenant_saas.py` | Multi-tenant isolation |
+| 2 | 21 | `test_t33_jwt_refresh.py` | JWT auth + refresh |
+| 4 | 19 | `test_t23_approval_2fa.py` | 2FA + approval workflow |
+| 5 | 18 | `test_branding.py` | White-label branding |
+| 6 | 14 | `test_t24_notifications.py` | Notification system |
+| 7 | 13 | `test_t31_logging.py` | Structured logging |
+| 8 | 12 | `test_t32_cors.py` | CORS hardening |
+| 9 | 11 | `test_t22_search_export.py` | Search + export |
+| 10 | 8 | `test_t25_e2e.py` | E2E happy paths |
+| | **166** | | |
+
+---
+
+## 3. Cara Menjalankan
+
+### 3.1 Semua Test
+
+```bash
+cd /Users/jerrymauri/Flipus
+
+# Aktifkan venv
+source .venv/bin/activate
+
+# Run semua
+pytest -v
+
+# Atau quiet (CI mode)
+pytest -q
+```
+
+**Expected output**:
+```
+........................................................................ [ 43%]
+........................................................................ [ 86%]
+......................                                                   [100%]
+=============================== warnings summary ===============================
+... (6 deprecation warnings, all pre-existing)
+166 passed, 6 warnings in 114.91s (0:01:54)
+```
+
+### 3.2 Test File Tertentu
+
+```bash
+# By file
+pytest tests/test_accounting_integrity.py -v
+
+# By pattern
+pytest -k "tenant" -v
+pytest -k "2fa or approval" -v
+
+# By marker (jika sudah ditambahkan)
+pytest -m "slow" -v
+```
+
+### 3.3 Dengan Coverage Report
+
+```bash
+# Terminal report (ringkas)
+pytest --cov=app --cov-report=term
+
+# HTML report (detail per file)
+pytest --cov=app --cov-report=html
+open htmlcov/index.html
+
+# XML report (untuk CI / SonarQube)
+pytest --cov=app --cov-report=xml
+```
+
+**Atau via Makefile**:
+```bash
+make test-cov       # terminal report
+make coverage       # HTML report
+```
+
+### 3.4 Fast Mode (Parallel)
+
+```bash
+# Install pytest-xfirst (fail fast)
+pip install pytest-xfirst
+
+# Atau manual fail-fast
+pytest -x -q
+
+# Parallel execution (perlu pytest-xdist)
+pip install pytest-xdist
+pytest -n auto -q
+```
+
+Lihat [`Makefile`](../../Makefile) untuk target yang sudah dikonfigurasi:
+```bash
+make test           # full suite
+make test-fast      # fail-fast mode
+make test-cov       # + coverage
+make coverage       # HTML report only
+```
+
+---
+
+## 4. Fixtures (conftest.py)
+
+Lihat [`tests/conftest.py`](../../tests/conftest.py).
+
+### 4.1 DB Fixtures
+
+```python
+@pytest.fixture
+def db():
+    """SQLite in-memory DB session, isolated per test."""
+    # Setup: create_all, seed master data
+    # Yield session
+    # Teardown: drop_all
+```
+
+### 4.2 HTTP Client
+
+```python
+@pytest.fixture
+def client(db):
+    """FastAPI TestClient bound to in-memory DB."""
+    return TestClient(app)
+```
+
+### 4.3 Auth Fixtures
+
+```python
+@pytest.fixture
+def admin_token(client):
+    """JWT access token untuk user admin tenant 1."""
+    # Login via /api/v1/auth/login, return token string
+
+@pytest.fixture
+def bendahara_token(client):
+    """JWT access token untuk bendahara."""
+
+@pytest.fixture
+def auditor_token(client):
+    """JWT access token untuk auditor (cross-tenant read)."""
+```
+
+### 4.4 User/Tenant Fixtures
+
+```python
+@pytest.fixture
+def admin_user(db):
+    """User instance dengan role admin, hashed password 'test1234'."""
+
+@pytest.fixture
+def tenant(db):
+    """Tenant instance dengan branding default."""
+
+@pytest.fixture
+def kuitansi(db, admin_user, tenant):
+    """Sample kuitansi sabat ini."""
+```
+
+---
+
+## 5. Coverage Breakdown (Baseline 45.3%)
+
+Diukur via `pytest --cov=app` per **2026-09-02**:
+
+### 5.1 Modul dengan Coverage Tinggi (>70%)
+
+| Modul | % | Catatan |
+|---|---:|---|
+| `app/core/security.py` | ~95% | JWT + password hash |
+| `app/api/v1/auth.py` | ~90% | Login flow + refresh |
+| `app/api/v1/admin.py` | ~85% | Admin endpoints |
+| `app/api/v1/tenants.py` | ~85% | Tenant CRUD |
+| `app/core/rate_limiter.py` | ~80% | slowapi setup |
+| `app/api/v1/notifications.py` | ~78% | Notification CRUD |
+| `app/api/v1/twofa.py` | ~75% | 2FA setup/verify |
+| `app/api/v1/branding.py` | ~75% | Logo + branding |
+| `app/core/upload_validator.py` | ~73% | File validation |
+
+### 5.2 Modul dengan Coverage Sedang (40-70%)
+
+| Modul | % | Catatan |
+|---|---:|---|
+| `app/api/v1/kuitansi.py` | ~65% | Search + export |
+| `app/api/v1/pengeluaran.py` | ~60% | Approval workflow |
+| `app/api/v1/dashboard.py` | ~58% | Sabat info |
+| `app/services/agregat_service.py` | ~55% | Agregat computation |
+| `app/services/porsi_service.py` | ~50% | Porsi recompute |
+
+### 5.3 Modul dengan Coverage Rendah (<40%) — Target S4-F
+
+| Modul | % | Catatan |
+|---|---:|---|
+| `app/services/whatsapp_service.py` | **0%** | WA integration (butuh mock Fonnte) |
+| `app/api/v1/wa_input.py` | ~13% | WA bot inbound |
+| `app/services/pdf_gabungan.py` | ~16% | PDF gabungan generator |
+| `app/services/backup_service.py` | ~17% | APScheduler backup |
+| `app/services/ocr_service.py` | ~25% | Gemini API integration |
+| `app/api/v1/pengeluaran_ocr.py` | ~30% | OCR endpoints |
+| `app/api/v1/sync.py` | ~35% | Offline sync |
+| `app/api/v1/scanner.py` | ~40% | Scanner batch |
+
+**Target S4-F**: naikkan ke ≥70% via penambahan test untuk modul-modul di §5.3.
+
+---
+
+## 6. CI Integration
+
+### 6.1 GitHub Actions (TODO S4-C+6)
+
+Contoh workflow:
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: pytest --cov=app --cov-fail-under=45 --cov-report=xml
+      - uses: codecov/codecov-action@v3
+```
+
+### 6.2 GitLab CI (TODO S4-C+7)
+
+```yaml
+# .gitlab-ci.yml
+test:
+  image: python:3.12
+  script:
+    - pip install -r requirements.txt
+    - pytest --cov=app --cov-report=xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+```
+
+### 6.3 Pre-commit Hook (Optional)
+
+```bash
+pip install pre-commit
+cat > .pre-commit-config.yaml <<EOF
+repos:
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: pytest -q -x
+        language: system
+        pass_filenames: false
+        always_run: true
+EOF
+
+pre-commit install
+```
+
+---
+
+## 7. Menulis Test Baru
+
+### 7.1 Konvensi
+
+- **File**: `tests/test_<fitur_atau_tahap>.py`
+- **Function**: `test_<apa yang diuji>`
+- **Class** (opsional): `class Test<Feature>:`
+- **Async**: pakai `@pytest.mark.asyncio` decorator + `async def test_...`
+
+### 7.2 Template
+
+```python
+"""Test untuk <fitur> — <deskripsi singkat>."""
+import pytest
+from fastapi.testclient import TestClient
+
+
+class TestFeatureX:
+    """Test suite untuk feature X."""
+
+    def test_create_success(self, client: TestClient, admin_token: str):
+        """Test create dengan input valid → 201."""
+        resp = client.post(
+            "/api/v1/kuitansi/create",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "nama_penyetor": "Test User",
+                "nominal": 100000,
+                "sabat_ke": 1,
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["nominal"] == 100000
+        assert "id" in data
+
+    def test_create_unauthorized(self, client: TestClient):
+        """Test create tanpa token → 401."""
+        resp = client.post("/api/v1/kuitansi/create", json={})
+        assert resp.status_code == 401
+
+    def test_create_validation_error(self, client: TestClient, admin_token: str):
+        """Test create dengan nominal negatif → 422."""
+        resp = client.post(
+            "/api/v1/kuitansi/create",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"nama_penyetor": "X", "nominal": -100, "sabat_ke": 1},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize("nominal,sabat_ke,expected", [
+        (100000, 1, 201),
+        (0, 1, 422),       # zero
+        (-100, 1, 422),    # negative
+        (100000, 53, 422), # invalid sabat
+    ])
+    def test_create_parametrize(
+        self, client: TestClient, admin_token: str,
+        nominal: int, sabat_ke: int, expected: int,
+    ):
+        resp = client.post(
+            "/api/v1/kuitansi/create",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"nama_penyetor": "X", "nominal": nominal, "sabat_ke": sabat_ke},
+        )
+        assert resp.status_code == expected
+```
+
+### 7.3 Best Practices
+
+✅ **DO**:
+- Satu assertion utama per test (tapi boleh beberapa yang terkait)
+- Pakai fixture daripada setup manual
+- Test positive + negative + edge case
+- Pakai `parametrize` untuk banyak variant input
+- Naming yang deskriptif: `test_<apa>_<kondisi>_<ekspektasi>`
+- Assert response schema + business rule + side effect
+
+❌ **DON'T**:
+- Test terlalu brittle (assertion terhadap timestamp, ID exact)
+- Test yang depends pada test lain (state leak)
+- Sleep / time-dependent test tanpa freezer
+- Mock terlalu banyak sampai test tidak meaningful
+- Commit test yang `skip` atau `xfail` permanen tanpa理由
+
+---
+
+## 8. Debugging Test yang Gagal
+
+### 8.1 Lihat Detail Error
+
+```bash
+# Short traceback
+pytest tests/test_x.py --tb=short
+
+# Long traceback (default)
+pytest tests/test_x.py --tb=long
+
+# No traceback (untuk CI, hanya lihat pass/fail)
+pytest -q --tb=no
+```
+
+### 8.2 Masuk ke PDB saat Gagal
+
+```bash
+pytest tests/test_x.py --pdb
+# Otomatis drop ke pdb post-mortem saat ada test gagal
+```
+
+### 8.3 Print Value
+
+```python
+def test_x(client):
+    resp = client.get("/api/v1/foo")
+    print(f"Response: {resp.json()}")  # muncul di -s mode
+    assert resp.status_code == 200
+```
+
+```bash
+pytest tests/test_x.py -s  # show print output
+```
+
+### 8.4 Run Hanya Satu Test
+
+```bash
+pytest tests/test_x.py::TestClass::test_method -v
+```
+
+---
+
+## 9. Performance & Parallel
+
+### 9.1 Duration Test
+
+```bash
+# Lihat test paling lambat
+pytest --durations=10
+
+# Fail jika ada test > 5 detik
+pytest --durations=10 --strict-markers
+```
+
+### 9.2 Parallel Execution
+
+```bash
+pip install pytest-xdist
+pytest -n 4          # 4 worker processes
+pytest -n auto       # sesuai jumlah CPU
+```
+
+**Catatan**: parallel execution butuh DB isolation per worker. Saat ini semua test pakai in-memory SQLite, jadi parallel aman.
+
+---
+
+## 10. Referensi
+
+- [`tests/conftest.py`](../../tests/conftest.py) — fixtures definition
+- [`tests/TESTS.md`](../../tests/TESTS.md) — coverage matrix historis per tahap
+- [`pyproject.toml`](../../pyproject.toml) — `[tool.pytest.ini_options]` config
+- [`Makefile`](../../Makefile) — `test`, `test-cov`, `coverage` targets
+- [`FASE2_VALIDASI_AKUNTANSI.md`](../../FASE2_VALIDASI_AKUNTANSI.md) — hasil audit accounting integrity
+- [`FASE3_AUDIT_BUG_SECURITY.md`](../../FASE3_AUDIT_BUG_SECURITY.md) — bug & security findings
+- pytest docs: https://docs.pytest.org/
+- pytest-asyncio: https://pytest-asyncio.readthedocs.io/
+- pytest-cov: https://pytest-cov.readthedocs.io/

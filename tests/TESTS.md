@@ -146,3 +146,16 @@ Beyond automated tests, these manual checks confirm production readiness:
 
 **Maintainer:** Jerry Mauri
 **Last updated:** 2026-08-19 (Tahap 25)
+---
+
+## 📌 Catatan FASE 3 Sprint 4 (2026-09-02)
+
+Dokumentasi testing dipindahkan/dilengkapi ke [`docs/TESTING.md`](../docs/TESTING.md).
+
+**Update terbaru**:
+- Total test saat ini: **166** (sebelumnya 100+ saat Tahap 25)
+- Coverage baseline: **45.3%** (target S4-F: ≥70%)
+- File test baru: `test_t31_logging.py`, `test_t32_cors.py`, `test_t33_jwt_refresh.py`
+- Makefile targets: `make test`, `make test-cov`, `make coverage`
+- Lihat [`docs/TESTING.md`](../docs/TESTING.md) untuk breakdown lengkap + cara menulis test baru.
+
