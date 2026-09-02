@@ -574,6 +574,12 @@ def forgot_password(
     # Sebelumnya pakai in-memory dict (process-local). Sekarang slowapi @limiter.limit("3/minute")
     # di atas yang handle — Redis-ready jika pindah ke multi-worker (lihat app/core/rate_limiter.py).
     client_ip = request.client.host if request.client else "unknown"
+    # FASE 3-S2.T4: audit log ENHANCED dengan IP + UA untuk forensic investigation.
+    xff_header = request.headers.get("x-forwarded-for", "")
+    if xff_header:
+        first_xff = xff_header.split(",")[0].strip()
+        client_ip = client_ip + " (xff=" + first_xff + ")"
+    ua = request.headers.get("user-agent", "unknown")[:200]
 
     # Tahap 20 SaaS: resolve tenant_slug kalau ada
     target_tenant_id = None
@@ -632,7 +638,7 @@ def forgot_password(
     audit_req = AuditLog(
         tenant_id=user.tenant_id,
         action="PASSWORD_RESET_REQUESTED_user_{}".format(user.id),
-        payload_hash=str(user.id),
+        payload_hash="{}|ip={}|ua={}".format(user.id, client_ip, ua)[:64],
     )
     db.add(audit_req)
     db.commit()
@@ -666,7 +672,7 @@ def forgot_password(
     audit_sent = AuditLog(
         tenant_id=user.tenant_id,
         action=f"PASSWORD_RESET_SENT_user_{user.id}_wa_{wa_status}",
-        payload_hash=str(user.id),
+        payload_hash="{}|ip={}|ua={}".format(user.id, client_ip, ua)[:64],
     )
     db.add(audit_sent)
     db.commit()
@@ -773,6 +779,7 @@ class ChangePasswordOut(BaseModel):
 @router.post("/change-password", response_model=ChangePasswordOut)
 def change_password(
     data: ChangePasswordIn,
+    request: Request,
     current: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -788,7 +795,7 @@ def change_password(
        - tidak boleh common password (top 100)
        - tidak boleh sama dengan current
     4. Auto-revoke semua token milik user ini (paksa logout semua device)
-    5. Audit log + notify WA ke user (best-effort)
+    5. Audit log (T4 — enhanced dengan IP address + user-agent untuk forensic) + notify WA ke user (best-effort)
     """
     from app.core.security import hash_password, verify_password
     from app.utils.password_gen import validate_password_strength
@@ -823,11 +830,21 @@ def change_password(
     # Token yang iat < password_changed_at akan ditolak di get_current_user.
     user.password_changed_at = datetime.now(timezone.utc)
 
-    # Audit
+    # FASE 3-S2.T4 — Audit log ENHANCED dengan IP + UA untuk forensic.
+    # Audit log ini penting kalau akun dibajak — attacker biasanya ganti password
+    # supaya korban tidak bisa login & tidak bisa reset. Dengan IP + UA, admin
+    # bisa cek: "apakah perubahan ini dari IP/lokasi yang biasa dipakai user?"
+    client_ip = request.client.host if request.client else "unknown"
+    # Perhatikan X-Forwarded-For kalau di belakang reverse proxy (nginx/cloudflare).
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        client_ip = f"{client_ip} (xff={xff.split(',')[0].strip()})"
+    ua = request.headers.get("user-agent", "unknown")[:200]
+
     db.add(AuditLog(
         tenant_id=user.tenant_id,
         action=f"PASSWORD_CHANGED_user_{user.id}",
-        payload_hash=user.username,
+        payload_hash=f"{user.username}|ip={client_ip}|ua={ua}",
     ))
     db.commit()
 
