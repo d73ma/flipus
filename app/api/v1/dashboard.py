@@ -230,6 +230,10 @@ def create_kuitansi(
         porsi_kas_jemaat=porsi_kas_jemaat,
         porsi_khusus_misi=porsi_khusus_misi,
         porsi_khusus_jemaat=porsi_khusus_jemaat,
+        # FASE 2 S5/R4: simpan porsi Uni untuk auditability
+        porsi_x_uni=porsi_x_uni,
+        porsi_pt_uni=porsi_pt_uni,
+        porsi_khusus_uni=porsi_khusus_uni,
         # T23-1: Approval workflow
         status=initial_status,
         created_by_user_id=current_user["id"],

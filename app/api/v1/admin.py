@@ -438,7 +438,10 @@ def recompute_porsi_all(
             k.porsi_kas_jemaat = new_kas_jemaat
             k.porsi_khusus_misi = porsi["pm_kh"]
             k.porsi_khusus_jemaat = porsi["pj_kh"]
-            # NOTE: porsi_uni belum disimpan di model — FASE 2 S5/R4 akan tambah kolom
+            # FASE 2 S5/R4: simpan porsi Uni juga
+            k.porsi_x_uni = porsi["pu_x"]
+            k.porsi_pt_uni = porsi["pu_pt"]
+            k.porsi_khusus_uni = porsi["pu_kh"]
             if old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat:
                 updated += 1
 

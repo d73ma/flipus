@@ -44,6 +44,13 @@ class Kuitansi(Base):
     porsi_khusus_misi = Column(BigInteger, default=0)  # Porsi Khusus yg ke Misi
     porsi_khusus_jemaat = Column(BigInteger, default=0)  # Porsi Khusus yg ke Jemaat
 
+    # FASE 2 S5/R4: porsi Uni (potongan langsung dari TOTAL, Jerry Model B pct_uni).
+    # Sebelumnya tidak disimpan — harus dihitung ulang setiap kali dibutuhkan.
+    # Sekarang disimpan untuk auditability (Uni bisa verify share-nya dari data historis).
+    porsi_x_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+    porsi_pt_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+    porsi_khusus_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+
     created_at = Column(DateTime, server_default=func.now())
 
     # T23-1: Approval Workflow
