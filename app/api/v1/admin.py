@@ -25,7 +25,9 @@ from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
 from app.models.user import User
 from app.services import backup_service
-from app.services.financial_calculator import calculate_distribution
+# FASE 2 S4/R3: migrasi dari legacy calculate_distribution (Layer 1+2) ke Jerry Model B (compute_porsi).
+# Single source of truth: semua call site yang recompute porsi harus pakai compute_porsi.
+from app.utils.porsi_calculator import compute_porsi
 from app.services.notification_service import create_notification, EventType
 from app.services.whatsapp import get_device_status
 
@@ -397,8 +399,8 @@ def recompute_porsi_all(
             .first()
         )
         if not cfg:
-            # Fallback default
-            cfg_x, cfg_pt, cfg_kh = 1.0, 0.5, 0.5
+            # Fallback default (SDA doctrine T101: pct_x_jemaat=0.0, 100% X ke Misi)
+            cfg_x, cfg_pt, cfg_kh = 0.0, 0.5, 0.5
             cfg_xu, cfg_ptu, cfg_khu = 0.0, 0.0, 0.0
         else:
             cfg_x = cfg.pct_x_jemaat
@@ -416,10 +418,11 @@ def recompute_porsi_all(
         )
         for k in kuitansis:
             processed += 1
-            dist = calculate_distribution(
-                perpuluhan_x=k.perpuluhan_x_angka,
+            # FASE 2 S4/R3: pakai Jerry Model B (compute_porsi), bukan legacy calculate_distribution
+            porsi = compute_porsi(
+                x=k.perpuluhan_x_angka,
                 pt=k.pt_angka,
-                khusus=k.khusus_angka,
+                kh=k.khusus_angka,
                 pct_x_jemaat=cfg_x,
                 pct_pt_jemaat=cfg_pt,
                 pct_khusus_jemaat=cfg_kh,
@@ -427,13 +430,16 @@ def recompute_porsi_all(
                 pct_pt_uni=cfg_ptu,
                 pct_khusus_uni=cfg_khu,
             )
+            new_kantor_misi = porsi["pm_x"] + porsi["pm_pt"] + porsi["pm_kh"]
+            new_kas_jemaat = porsi["pj_x"] + porsi["pj_pt"] + porsi["pj_kh"]
             old_misi = k.porsi_kantor_misi
             old_jemaat = k.porsi_kas_jemaat
-            k.porsi_kantor_misi = dist["porsi_kantor_misi"]
-            k.porsi_kas_jemaat = dist["porsi_kas_jemaat"]
-            k.porsi_khusus_misi = dist["porsi_khusus_misi"]
-            k.porsi_khusus_jemaat = dist["porsi_khusus_jemaat"]
-            if old_misi != dist["porsi_kantor_misi"] or old_jemaat != dist["porsi_kas_jemaat"]:
+            k.porsi_kantor_misi = new_kantor_misi
+            k.porsi_kas_jemaat = new_kas_jemaat
+            k.porsi_khusus_misi = porsi["pm_kh"]
+            k.porsi_khusus_jemaat = porsi["pj_kh"]
+            # NOTE: porsi_uni belum disimpan di model — FASE 2 S5/R4 akan tambah kolom
+            if old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat:
                 updated += 1
 
     db.add(AuditLog(
