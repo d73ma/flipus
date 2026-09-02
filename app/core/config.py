@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     PII_ENCRYPTION_KEY: str
+    # FASE 3-S2.T3 — dual-key rotation window untuk PII Fernet.
+    # Saat rotasi:
+    #   1. Set PII_ENCRYPTION_KEY = new_key (encrypt pakai new_key)
+    #   2. Set PII_ENCRYPTION_KEY_PREVIOUS = old_key (decrypt fallback)
+    #   3. Jalankan maintenance script `rotate_pii_to_new_key.py` untuk
+    #      re-encrypt semua ciphertext existing ke new_key
+    #   4. Kosongkan PII_ENCRYPTION_KEY_PREVIOUS setelah selesai.
+    PII_ENCRYPTION_KEY_PREVIOUS: str = ""
     LICENSE_TENANT_SIGNATURE_SALT: str = "UKIKT_FLIPUS_2026_NATAAN_RATAHAN_SALT"
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"

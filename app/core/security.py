@@ -10,7 +10,17 @@ from fastapi import Header, HTTPException, Request, status as _status
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-fernet = Fernet(settings.PII_ENCRYPTION_KEY.encode())
+# FASE 3-S2.T3 — dual-key Fernet window untuk PII rotation.
+# Encrypt selalu pakai primary key (newest). Decrypt mencoba primary, lalu
+# fallback ke previous (old) kalau ada. Setelah re-encrypt selesai,
+# kosongkan PII_ENCRYPTION_KEY_PREVIOUS.
+_pii_fernet_primary = Fernet(settings.PII_ENCRYPTION_KEY.encode())
+_pii_fernet_previous: Optional[Fernet] = None
+if settings.PII_ENCRYPTION_KEY_PREVIOUS:
+    try:
+        _pii_fernet_previous = Fernet(settings.PII_ENCRYPTION_KEY_PREVIOUS.encode())
+    except (ValueError, TypeError):
+        _pii_fernet_previous = None
 
 
 def utcnow() -> datetime:
@@ -91,13 +101,44 @@ def decode_access_token(token: str) -> Optional[dict]:
     return None
 
 def encrypt_pii(plain_text: str) -> str:
-    return fernet.encrypt(plain_text.encode()).decode()
+    """
+    Encrypt PII dengan primary key. Selalu pakai current key.
+    Untuk re-encrypt ciphertext lama setelah rotasi, lihat utility script
+    `scripts/rotate_pii_to_new_key.py`.
+    """
+    return _pii_fernet_primary.encrypt(plain_text.encode()).decode()
+
 
 def decrypt_pii(token: str) -> str:
-    try:
-        return fernet.decrypt(token.encode()).decode()
-    except InvalidToken:
+    """
+    Decrypt PII dengan dual-key fallback (T3).
+
+    Flow:
+      1. Try decrypt pakai primary key.
+      2. Kalau InvalidToken DAN previous key di-set → try decrypt pakai previous.
+      3. Kalau masih gagal → return "" (safe default, jangan bocor plaintext error).
+
+    Ini mendukung rotasi key tanpa downtime: setelah admin rotate PII key
+    dengan meng-set PII_ENCRYPTION_KEY=new dan PII_ENCRYPTION_KEY_PREVIOUS=old,
+    data lama tetap bisa dibaca sampai re-encryption selesai. Setelah
+    re-encryption selesai, kosongkan PII_ENCRYPTION_KEY_PREVIOUS.
+    """
+    if not token:
         return ""
+    # 1) Primary key
+    try:
+        return _pii_fernet_primary.decrypt(token.encode()).decode()
+    except (InvalidToken, ValueError):
+        pass
+
+    # 2) Previous key fallback
+    if _pii_fernet_previous is not None:
+        try:
+            return _pii_fernet_previous.decrypt(token.encode()).decode()
+        except (InvalidToken, ValueError):
+            pass
+
+    return ""
 
 def generate_tenant_signature(uni: str, kantor_misi: str, jemaat: str) -> str:
     raw = f"{uni}|{kantor_misi}|{jemaat}|{settings.LICENSE_TENANT_SIGNATURE_SALT}"
