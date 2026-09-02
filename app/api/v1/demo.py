@@ -54,7 +54,7 @@ def _is_demo_enabled() -> bool:
     return os.getenv("DEMO_MODE_ENABLED", "true").lower() == "true"
 
 
-@router.get("/login-as/{role}", response_model=DemoLoginOut)
+@router.get("/login-as/{role}", tags=['Demo'], response_model=DemoLoginOut)
 def demo_login_as(
     role: str,
     tenant_slug: Optional[str] = Query(
@@ -166,7 +166,7 @@ def demo_login_as(
     )
 
 
-@router.get("/info")
+@router.get("/info", tags=['Demo'])
 def demo_info():
     """Info mode demo (untuk landing page banner)."""
     return {
@@ -190,7 +190,7 @@ class TenantBrandingPreview(BaseModel):
     demo_user_count: int  # berapa user demo di jemaat ini
 
 
-@router.get("/tenants", response_model=List[TenantBrandingPreview])
+@router.get("/tenants", tags=['Demo'], response_model=List[TenantBrandingPreview])
 def demo_list_tenants(db: Session = Depends(get_db)):
     """
     List jemaat dengan branding preview (untuk landing page).

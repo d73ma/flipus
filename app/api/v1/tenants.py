@@ -174,7 +174,7 @@ def _audit_admin_change(db: Session, tenant_id: int, actor_id: int, action: str,
 
 # ===== PUBLIC RESOLVE =====
 
-@router.get("/resolve/{identifier}", response_model=TenantPublicOut)
+@router.get("/resolve/{identifier}", tags=['Tenants'], response_model=TenantPublicOut)
 def resolve_tenant(identifier: str, db: Session = Depends(get_db)):
     """
     Public tenant lookup by slug or subdomain.
@@ -189,7 +189,7 @@ def resolve_tenant(identifier: str, db: Session = Depends(get_db)):
 
 # ===== CURRENT USER'S TENANT =====
 
-@router.get("/me", response_model=TenantOut)
+@router.get("/me", tags=['Tenants'], response_model=TenantOut)
 def get_my_tenant(
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
@@ -210,7 +210,7 @@ def get_my_tenant(
 
 # ===== ADMIN UNI: LIST =====
 
-@router.get("", response_model=TenantsListOut)
+@router.get("", tags=['Tenants'], response_model=TenantsListOut)
 def list_tenants(
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
@@ -243,7 +243,7 @@ def list_tenants(
 
 # ===== ADMIN UNI: DETAIL =====
 
-@router.get("/{tenant_id}", response_model=TenantOut)
+@router.get("/{tenant_id}", tags=['Tenants'], response_model=TenantOut)
 def get_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -264,7 +264,7 @@ def get_tenant(
 
 # ===== ADMIN UNI: UPDATE PROFILE =====
 
-@router.patch("/{tenant_id}", response_model=TenantOut)
+@router.patch("/{tenant_id}", tags=['Tenants'], response_model=TenantOut)
 def update_tenant(
     tenant_id: int,
     payload: TenantUpdateIn,
@@ -329,7 +329,7 @@ def update_tenant(
 
 # ===== ADMIN UNI: STATUS CHANGE =====
 
-@router.patch("/{tenant_id}/status", response_model=TenantOut)
+@router.patch("/{tenant_id}/status", tags=['Tenants'], response_model=TenantOut)
 def change_tenant_status(
     tenant_id: int,
     payload: StatusChangeIn,
@@ -426,7 +426,7 @@ def change_tenant_status(
 
 # ===== ADMIN UNI: PLAN CHANGE =====
 
-@router.patch("/{tenant_id}/plan", response_model=TenantOut)
+@router.patch("/{tenant_id}/plan", tags=['Tenants'], response_model=TenantOut)
 def change_tenant_plan(
     tenant_id: int,
     payload: PlanChangeIn,
@@ -488,7 +488,7 @@ class LogoUploadOut(BaseModel):
 
 # ===== Branding endpoints (Tahap 21) =====
 
-@router.patch("/{tenant_id}/branding", response_model=BrandingOut)
+@router.patch("/{tenant_id}/branding", tags=['Tenants'], response_model=BrandingOut)
 def update_branding_endpoint(
     tenant_id: int,
     payload: BrandingUpdateIn,
@@ -537,7 +537,7 @@ def update_branding_endpoint(
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.get("/{tenant_id}/branding", response_model=BrandingOut)
+@router.get("/{tenant_id}/branding", tags=['Tenants'], response_model=BrandingOut)
 def get_branding_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -558,7 +558,7 @@ def get_branding_endpoint(
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.post("/{tenant_id}/logo", response_model=LogoUploadOut)
+@router.post("/{tenant_id}/logo", tags=['Tenants'], response_model=LogoUploadOut)
 async def upload_logo_endpoint(
     tenant_id: int,
     file: UploadFile = File(...),
@@ -613,7 +613,7 @@ async def upload_logo_endpoint(
     )
 
 
-@router.delete("/{tenant_id}/logo", response_model=BrandingOut)
+@router.delete("/{tenant_id}/logo", tags=['Tenants'], response_model=BrandingOut)
 def delete_logo_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -649,7 +649,7 @@ def delete_logo_endpoint(
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.get("/logo/{tenant_id}")
+@router.get("/logo/{tenant_id}", tags=['Tenants'])
 def get_logo_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),

@@ -37,7 +37,7 @@ class SabatInfoOut(BaseModel):
     tahun: int
 
 
-@router.get("/sabat-info", response_model=SabatInfoOut)
+@router.get("/sabat-info", tags=['Dashboard'], response_model=SabatInfoOut)
 def sabat_info(
     date: str = None,
     current_user: dict = Depends(get_current_user),
@@ -139,7 +139,7 @@ def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
     }
 
 
-@router.post("/kuitansi", response_model=KuitansiOut)
+@router.post("/kuitansi", tags=['Dashboard'], response_model=KuitansiOut)
 def create_kuitansi(
     payload: KuitansiIn,
     db: Session = Depends(get_db),
@@ -380,7 +380,7 @@ class PendingListOut(BaseModel):
     total: int
 
 
-@router.post("/kuitansi/{kuitansi_id}/approve", response_model=KuitansiApprovalOut)
+@router.post("/kuitansi/{kuitansi_id}/approve", tags=['Dashboard'], response_model=KuitansiApprovalOut)
 def approve_kuitansi(
     kuitansi_id: int,
     db: Session = Depends(get_db),
@@ -524,7 +524,7 @@ def approve_kuitansi(
     )
 
 
-@router.post("/kuitansi/{kuitansi_id}/reject", response_model=KuitansiApprovalOut)
+@router.post("/kuitansi/{kuitansi_id}/reject", tags=['Dashboard'], response_model=KuitansiApprovalOut)
 def reject_kuitansi(
     kuitansi_id: int,
     payload: ApprovalActionIn,
@@ -622,7 +622,7 @@ def reject_kuitansi(
     )
 
 
-@router.get("/kuitansi/pending", response_model=PendingListOut)
+@router.get("/kuitansi/pending", tags=['Dashboard'], response_model=PendingListOut)
 def list_pending_kuitansi(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -687,7 +687,7 @@ def list_pending_kuitansi(
     return PendingListOut(items=items, total=len(items))
 
 
-@router.get("/kuitansi/rejected")
+@router.get("/kuitansi/rejected", tags=['Dashboard'])
 def list_rejected_kuitansi(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),

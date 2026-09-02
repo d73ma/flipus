@@ -129,7 +129,7 @@ def _match_kategori(db: Session, tenant_id: int, hint: str) -> Optional[int]:
     return None
 
 
-@router.post("/pengeluaran/ocr-batch-upload", response_model=OcrPengeluaranBatchOut)
+@router.post("/pengeluaran/ocr-batch-upload", tags=['Pengeluaran'], response_model=OcrPengeluaranBatchOut)
 async def ocr_batch_upload(
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
@@ -219,7 +219,7 @@ def _gen_nomor_pengeluaran_inline(db: Session, tenant_id: int, tanggal: str) -> 
     return f"{prefix}{seq:03d}"
 
 
-@router.post("/pengeluaran/ocr-save", response_model=OcrPengeluaranSaveOut)
+@router.post("/pengeluaran/ocr-save", tags=['Pengeluaran'], response_model=OcrPengeluaranSaveOut)
 def ocr_save(
     body: OcrPengeluaranSaveIn,
     current_user: dict = Depends(get_current_user),

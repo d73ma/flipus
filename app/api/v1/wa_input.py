@@ -347,7 +347,7 @@ def _parse_shortcut_format(message: str) -> dict | None:
 
 # === Main webhook endpoint ===
 
-@router.get("/wa/inbound")
+@router.get("/wa/inbound", tags=['WhatsApp'])
 async def wa_inbound_get():
     """
     GET handler untuk Fonnte webhook URL verification.
@@ -385,7 +385,7 @@ async def _set_wa_from_state(request: Request) -> None:
         request.state.wa_from = ""
 
 
-@router.post("/wa/inbound", dependencies=[Depends(_set_wa_from_state)])
+@router.post("/wa/inbound", tags=['WhatsApp'], dependencies=[Depends(_set_wa_from_state)])
 @_rate_limiter.limit("1/2seconds", key_func=_key_func_by_phone)  # FASE 3 K2: anti-spam per-phone
 async def wa_inbound(request: Request, db: Session = Depends(get_db)):
     """
@@ -885,7 +885,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
 
 # ==================== STAGING LIST (BENDAHARA) ====================
 
-@router.get("/kuitansi/staging")
+@router.get("/kuitansi/staging", tags=['WhatsApp'])
 def list_staging(
     tenant_id: Optional[int] = None,
     current: dict = Depends(require_roles("BENDAHARA")),
@@ -945,7 +945,7 @@ def list_staging(
 
 # ==================== DELETE STAGING ITEM (BENDAHARA) ====================
 
-@router.delete("/kuitansi/staging/{item_id}")
+@router.delete("/kuitansi/staging/{item_id}", tags=['WhatsApp'])
 def delete_staging_item(
     item_id: int,
     current: dict = Depends(require_roles("BENDAHARA")),
@@ -1006,7 +1006,7 @@ class FinalizeStagingIn(BaseModel):
     tanggal_sabat: str | None = None
 
 
-@router.post("/kuitansi/finalize-staging")
+@router.post("/kuitansi/finalize-staging", tags=['WhatsApp'])
 def finalize_staging(
     body: FinalizeStagingIn,
     current: dict = Depends(require_roles("BENDAHARA")),

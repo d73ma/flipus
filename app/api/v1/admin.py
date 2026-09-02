@@ -53,7 +53,7 @@ class FonnteDeviceStatusOut(BaseModel):
     checked_at: str
 
 
-@router.get("/fonnte/device-status", response_model=FonnteDeviceStatusOut)
+@router.get("/fonnte/device-status", tags=['Admin'], response_model=FonnteDeviceStatusOut)
 def get_fonnte_device_status(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -82,7 +82,7 @@ class ManualResetOut(BaseModel):
     note: str
 
 
-@router.post("/trigger-reset", response_model=ManualResetOut)
+@router.post("/trigger-reset", tags=['Admin'], response_model=ManualResetOut)
 def trigger_manual_reset(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -130,7 +130,7 @@ class BackupOut(BaseModel):
     method: str
 
 
-@router.post("/backup-db", response_model=BackupOut)
+@router.post("/backup-db", tags=['Admin'], response_model=BackupOut)
 def backup_db(
     method: str = "binary",
     retention: int = 7,
@@ -216,7 +216,7 @@ class BackupListOut(BaseModel):
     count: int
 
 
-@router.get("/backups", response_model=BackupListOut)
+@router.get("/backups", tags=['Admin'], response_model=BackupListOut)
 def list_backups(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -248,7 +248,7 @@ class RestoreOut(BaseModel):
     method: str
 
 
-@router.post("/restore-db", response_model=RestoreOut)
+@router.post("/restore-db", tags=['Admin'], response_model=RestoreOut)
 def restore_db(
     payload: RestoreIn,
     db: Session = Depends(get_db),
@@ -292,7 +292,7 @@ def restore_db(
 
 # ===== Manual Backup Trigger =====
 
-@router.post("/trigger-backup", response_model=BackupOut)
+@router.post("/trigger-backup", tags=['Admin'], response_model=BackupOut)
 def trigger_manual_backup(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -352,7 +352,7 @@ class RecomputePorsiOut(BaseModel):
     note: str
 
 
-@router.post("/recompute-porsi", response_model=RecomputePorsiOut)
+@router.post("/recompute-porsi", tags=['Admin'], response_model=RecomputePorsiOut)
 def recompute_porsi_all(
     tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),

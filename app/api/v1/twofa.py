@@ -98,7 +98,7 @@ class TwoFactorStatusOut(BaseModel):
 
 # ===== Endpoints =====
 
-@router.get("/2fa/status", response_model=TwoFactorStatusOut)
+@router.get("/2fa/status", tags=['2FA'], response_model=TwoFactorStatusOut)
 def get_2fa_status(
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
@@ -116,7 +116,7 @@ def get_2fa_status(
     )
 
 
-@router.post("/2fa/setup", response_model=TwoFactorSetupOut)
+@router.post("/2fa/setup", tags=['2FA'], response_model=TwoFactorSetupOut)
 def setup_2fa(
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
@@ -152,7 +152,7 @@ def setup_2fa(
     return TwoFactorSetupOut(**response)
 
 
-@router.post("/2fa/verify", response_model=TwoFactorVerifyOut)
+@router.post("/2fa/verify", tags=['2FA'], response_model=TwoFactorVerifyOut)
 def verify_2fa_setup(
     payload: TwoFactorVerifyIn,
     db: Session = Depends(get_db),
@@ -208,7 +208,7 @@ def verify_2fa_setup(
     )
 
 
-@router.post("/2fa/disable")
+@router.post("/2fa/disable", tags=['2FA'])
 def disable_2fa(
     payload: TwoFactorDisableIn,
     db: Session = Depends(get_db),
@@ -279,7 +279,7 @@ def disable_2fa(
     return {"status": "disabled", "message": "2FA berhasil dimatikan"}
 
 
-@router.post("/2fa/backup-codes", response_model=TwoFactorBackupCodesOut)
+@router.post("/2fa/backup-codes", tags=['2FA'], response_model=TwoFactorBackupCodesOut)
 def regenerate_backup_codes(
     totp_code: str,
     db: Session = Depends(get_db),
@@ -322,7 +322,7 @@ def regenerate_backup_codes(
     )
 
 
-@router.post("/2fa/login")
+@router.post("/2fa/login", tags=['2FA'])
 def login_step2(
     payload: TwoFactorLoginIn,
     db: Session = Depends(get_db),

@@ -128,7 +128,7 @@ def _gen_nomor_pengeluaran_inline(db: Session, tenant_id: int, tanggal: str) -> 
     return f"{prefix}{seq:03d}"
 
 
-@router.post("/wa/pengeluaran/inbound")
+@router.post("/wa/pengeluaran/inbound", tags=['Pengeluaran'])
 async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)):
     """Webhook Fonnte untuk chat Bendahara terkait Pengeluaran."""
     body = await request.json()
@@ -360,7 +360,7 @@ def _send_reply(phone: str, message: str):
         print(err, file=sys.stderr)
 
 
-@router.post("/wa/pengeluaran/reset")
+@router.post("/wa/pengeluaran/reset", tags=['Pengeluaran'])
 def reset_session(request: Request, db: Session = Depends(get_db)):
     """Admin endpoint untuk reset WaSession P_*. Body: {phone: ...}."""
     body = __import__("asyncio").run(request.json())

@@ -44,7 +44,7 @@ class MisiOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-@router.get("/uni", response_model=List[UniOut])
+@router.get("/uni", tags=['Master'], response_model=List[UniOut])
 def list_uni(db: Session = Depends(get_db)):
     """Public — list 3 Uni untuk dropdown form registrasi."""
     # Cache 10 menit — Uni jarang berubah
@@ -56,7 +56,7 @@ def _cached_list_uni(db: Session):
     return db.query(Uni).order_by(Uni.id).all()
 
 
-@router.get("/misi", response_model=List[MisiOut])
+@router.get("/misi", tags=['Master'], response_model=List[MisiOut])
 def list_misi(
     uni_id: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -110,7 +110,7 @@ class SeedOut(BaseModel):
     skipped: int
 
 
-@router.post("/seed", response_model=SeedOut)
+@router.post("/seed", tags=['Master'], response_model=SeedOut)
 def seed_master_data(
     db: Session = Depends(get_db),
     _: bool = Depends(require_admin_bootstrap_dependency),
@@ -213,7 +213,7 @@ def _caller_misi_for_master(db: Session, current: dict) -> MisiKonferens:
     return misi
 
 
-@router.get("/persentase", response_model=PersentaseConfigOut)
+@router.get("/persentase", tags=['Master'], response_model=PersentaseConfigOut)
 def get_persentase_config(
     scope: str,
     ref_id: int,
@@ -292,7 +292,7 @@ def get_persentase_config(
     )
 
 
-@router.post("/persentase", response_model=PersentaseConfigOut)
+@router.post("/persentase", tags=['Master'], response_model=PersentaseConfigOut)
 def update_persentase_config(
     payload: PersentaseConfigIn,
     db: Session = Depends(get_db),

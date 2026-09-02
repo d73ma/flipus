@@ -77,7 +77,7 @@ def _require_bendahara(current_user: dict):
     if current_user["role"] not in ("BENDAHARA", "KETUA_KEUANGAN"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya bendahara/ketua keuangan")
 
-@router.get("/sabat-info", response_model=SabatInfoOut)
+@router.get("/sabat-info", tags=['Reports'], response_model=SabatInfoOut)
 def get_sabat_info_endpoint(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -126,7 +126,7 @@ def get_sabat_info_endpoint(
     )
 
 
-@router.get("/mingguan", response_model=ReportOut)
+@router.get("/mingguan", tags=['Reports'], response_model=ReportOut)
 def laporan_mingguan(
     id_rekap_mingguan: str,
     status_filter: str = "finalized",  # T23-1: 'finalized'|'draft'|'all'
@@ -185,7 +185,7 @@ def laporan_mingguan(
         grand_total_huruf=terbilang(sum_x + sum_pt),
     )
 
-@router.get("/summary", response_model=SummaryOut)
+@router.get("/summary", tags=['Reports'], response_model=SummaryOut)
 def ringkasan_summary(
     bulan: str = None,
     db: Session = Depends(get_db),
@@ -230,7 +230,7 @@ def ringkasan_summary(
         grand_total_huruf=terbilang(sum_x + sum_pt),
     )
 
-@router.post("/blast-weekly", response_model=BlastOut)
+@router.post("/blast-weekly", tags=['Reports'], response_model=BlastOut)
 def blast_weekly(
     request: BlastRequest,
     db: Session = Depends(get_db),
@@ -600,7 +600,7 @@ def _sabat_ke_to_date_range(tahun: int, sabat_from: int, sabat_to: int) -> tuple
     return date_from.isoformat(), date_to.isoformat()
 
 
-@router.post("/keuangan", response_model=LaporanKeuanganOut)
+@router.post("/keuangan", tags=['Reports'], response_model=LaporanKeuanganOut)
 def generate_laporan_keuangan(
     payload: LaporanKeuanganRequest,
     db: Session = Depends(get_db),

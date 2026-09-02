@@ -26,7 +26,7 @@ class TenantOut(BaseModel):
     nama_ketua_keuangan: str
     nama_bendahara: str
 
-@router.post("/register-tenant", response_model=TenantOut)
+@router.post("/register-tenant", tags=['Onboarding'], response_model=TenantOut)
 def register(
     payload: OnboardingIn,
     db: Session = Depends(get_db),

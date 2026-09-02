@@ -177,7 +177,7 @@ def _resolve_target_tenant(
 
 # ===== Endpoint 1: POST /users/invite =====
 
-@router.post("/users/invite")  # response_model=InviteUserOut sengaja dihapus — biar return raw dict
+@router.post("/users/invite", tags=['Managed'])  # response_model=InviteUserOut sengaja dihapus — biar return raw dict
 def invite_user(
     payload: InviteUserIn,
     db: Session = Depends(get_db),
@@ -320,7 +320,7 @@ def invite_user(
 
 # ===== Endpoint 2: POST /kuitansi/{kuitansi_id}/void =====
 
-@router.post("/kuitansi/{kuitansi_id}/void", response_model=VoidOut)
+@router.post("/kuitansi/{kuitansi_id}/void", tags=['Managed'], response_model=VoidOut)
 def void_kuitansi(
     kuitansi_id: int,
     reason: Optional[str] = None,  # query param ?reason=...
@@ -387,7 +387,7 @@ def void_kuitansi(
 
 # ===== Endpoint 3: POST /pengeluaran/{pengeluaran_id}/void =====
 
-@router.post("/pengeluaran/{pengeluaran_id}/void", response_model=VoidOut)
+@router.post("/pengeluaran/{pengeluaran_id}/void", tags=['Managed'], response_model=VoidOut)
 def void_pengeluaran(
     pengeluaran_id: int,
     reason: Optional[str] = None,

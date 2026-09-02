@@ -179,7 +179,7 @@ def _generate_nomor_for_kuitansi(db: Session, tenant: Tenant, tanggal: str) -> s
 
 # ===== Endpoint =====
 
-@router.post("/kuitansi/quick-input", response_model=QuickInputResponse)
+@router.post("/kuitansi/quick-input", tags=['QuickInput'], response_model=QuickInputResponse)
 def quick_input(
     body: QuickInputRequest,
     db: Session = Depends(get_db),
@@ -363,7 +363,7 @@ class KategoriListItem(BaseModel):
     urutan: int
 
 
-@router.get("/kategori/list", response_model=List[KategoriListItem])
+@router.get("/kategori/list", tags=['QuickInput'], response_model=List[KategoriListItem])
 def list_kategori(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),

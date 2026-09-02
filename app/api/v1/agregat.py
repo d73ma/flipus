@@ -256,7 +256,7 @@ def _filter_by_bulan(rows: List[Kuitansi], bulan: Optional[str]) -> List[Kuitans
 
 # ===== GET /agregat/tenant =====
 
-@router.get("/tenant", response_model=AgregatTenantOut)
+@router.get("/tenant", tags=['Agregat'], response_model=AgregatTenantOut)
 def agregat_tenant(
     bulan: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -306,7 +306,7 @@ def agregat_tenant(
 
 # ===== GET /agregat/misi =====
 
-@router.get("/misi", response_model=AgregatMisiOut)
+@router.get("/misi", tags=['Agregat'], response_model=AgregatMisiOut)
 def agregat_misi(
     bulan: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -438,7 +438,7 @@ def agregat_misi(
 
 # ===== GET /agregat/uni =====
 
-@router.get("/uni", response_model=AgregatMisiOut)
+@router.get("/uni", tags=['Agregat'], response_model=AgregatMisiOut)
 def agregat_uni(
     bulan: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -741,7 +741,7 @@ def _tenant_ids_for_caller(db: Session, current_user: dict) -> tuple[List[int], 
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak dikenal")
 
 
-@router.get("/sabat-ini", response_model=SabatIniOut)
+@router.get("/sabat-ini", tags=['Agregat'], response_model=SabatIniOut)
 def agregat_sabat_ini(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -1026,7 +1026,7 @@ def agregat_sabat_ini(
     )
 
 
-@router.get("/ytd", response_model=YtdBarOut)
+@router.get("/ytd", tags=['Agregat'], response_model=YtdBarOut)
 def agregat_ytd(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -1190,7 +1190,7 @@ def agregat_ytd(
     )
 
 
-@router.get("/chart/mingguan", response_model=ChartMingguanOut)
+@router.get("/chart/mingguan", tags=['Agregat'], response_model=ChartMingguanOut)
 def chart_mingguan(
     n_weeks: int = 8,
     db: Session = Depends(get_db),

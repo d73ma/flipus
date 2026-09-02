@@ -154,7 +154,7 @@ def _resolve_uni_misi(db: Session, uni_id: int, misi_id: int) -> tuple[Uni, Misi
 
 # ===== ENDPOINTS =====
 
-@router.post("/pendeta", response_model=RegisterPendetaOut)
+@router.post("/pendeta", tags=['Register'], response_model=RegisterPendetaOut)
 def register_pendeta_endpoint(payload: RegisterPendetaIn, db: Session = Depends(get_db)):
     """
     Self-service registrasi Pendeta.
@@ -238,7 +238,7 @@ def register_pendeta_endpoint(payload: RegisterPendetaIn, db: Session = Depends(
     )
 
 
-@router.post("/auditor", response_model=RegisterAuditorOut)
+@router.post("/auditor", tags=['Register'], response_model=RegisterAuditorOut)
 def register_auditor_endpoint(payload: RegisterAuditorIn, db: Session = Depends(get_db)):
     """
     Self-service registrasi Auditor Misi/Konferens.
@@ -320,7 +320,7 @@ def register_auditor_endpoint(payload: RegisterAuditorIn, db: Session = Depends(
     )
 
 
-@router.post("/admin", response_model=RegisterAdminOut)
+@router.post("/admin", tags=['Register'], response_model=RegisterAdminOut)
 def register_admin_endpoint(payload: RegisterAdminIn, db: Session = Depends(get_db)):
     """
     Self-service registrasi Admin Uni.

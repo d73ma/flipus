@@ -180,7 +180,7 @@ def _pengeluaran_to_dict(p: Pengeluaran, kategori: Optional[KategoriPengeluaran]
 
 # ========== KategoriPengeluaran endpoints ==========
 
-@router.get("/kategori-pengeluaran/list", response_model=List[KategoriPengeluaranOut])
+@router.get("/kategori-pengeluaran/list", tags=['Pengeluaran'], response_model=List[KategoriPengeluaranOut])
 def list_kategori_pengeluaran(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -204,7 +204,7 @@ def list_kategori_pengeluaran(
     return [KategoriPengeluaranOut.model_validate(_kategori_to_dict(r)) for r in rows]
 
 
-@router.post("/kategori-pengeluaran/create", response_model=KategoriPengeluaranOut, status_code=201)
+@router.post("/kategori-pengeluaran/create", tags=['Pengeluaran'], response_model=KategoriPengeluaranOut, status_code=201)
 def create_kategori_pengeluaran(
     payload: KategoriPengeluaranCreate,
     db: Session = Depends(get_db),
@@ -250,7 +250,7 @@ def create_kategori_pengeluaran(
 
 # ========== Pengeluaran endpoints ==========
 
-@router.get("/pengeluaran/list", response_model=List[PengeluaranOut])
+@router.get("/pengeluaran/list", tags=['Pengeluaran'], response_model=List[PengeluaranOut])
 def list_pengeluaran(
     status_filter: Optional[str] = None,
     bulan: Optional[str] = None,  # YYYY-MM
@@ -279,7 +279,7 @@ def list_pengeluaran(
     return [PengeluaranOut.model_validate(_pengeluaran_to_dict(r, kat_map.get(r.kategori_pengeluaran_id))) for r in rows]
 
 
-@router.post("/pengeluaran/create", response_model=PengeluaranOut, status_code=201)
+@router.post("/pengeluaran/create", tags=['Pengeluaran'], response_model=PengeluaranOut, status_code=201)
 def create_pengeluaran(
     payload: PengeluaranCreate,
     db: Session = Depends(get_db),
@@ -326,7 +326,7 @@ def create_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.put("/pengeluaran/{pengeluaran_id}/update", response_model=PengeluaranOut)
+@router.put("/pengeluaran/{pengeluaran_id}/update", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def update_pengeluaran(
     pengeluaran_id: int,
     payload: PengeluaranUpdate,
@@ -378,7 +378,7 @@ def update_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/submit", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/submit", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def submit_pengeluaran(
     pengeluaran_id: int,
     db: Session = Depends(get_db),
@@ -421,7 +421,7 @@ def submit_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/approve-ketua", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/approve-ketua", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def approve_ketua(
     pengeluaran_id: int,
     payload: PengeluaranAction = PengeluaranAction(),
@@ -453,7 +453,7 @@ def approve_ketua(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/approve-pendeta", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/approve-pendeta", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def approve_pendeta(
     pengeluaran_id: int,
     payload: PengeluaranAction = PengeluaranAction(),
@@ -485,7 +485,7 @@ def approve_pendeta(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/reject", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/reject", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def reject_pengeluaran(
     pengeluaran_id: int,
     payload: PengeluaranReject,
@@ -517,7 +517,7 @@ def reject_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.get("/pengeluaran/pending-count")
+@router.get("/pengeluaran/pending-count", tags=['Pengeluaran'])
 def pending_count(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -541,7 +541,7 @@ def pending_count(
     return {"pending_ketua": pending_ketua or 0, "pending_pendeta": pending_pendeta or 0}
 
 
-@router.get("/pengeluaran/rekap", response_model=RekapBulananOut)
+@router.get("/pengeluaran/rekap", tags=['Pengeluaran'], response_model=RekapBulananOut)
 def rekap_bulanan(
     bulan: str,  # YYYY-MM
     db: Session = Depends(get_db),

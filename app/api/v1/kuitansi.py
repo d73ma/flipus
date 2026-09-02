@@ -286,7 +286,7 @@ def _is_valid_iso_date(s: str) -> bool:
 
 # ===== Endpoints =====
 
-@router.get("/search", response_model=KuitansiSearchOut)
+@router.get("/search", tags=['Kuitansi'], response_model=KuitansiSearchOut)
 def search_kuitansi(
     date_from: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
@@ -395,7 +395,7 @@ def search_kuitansi(
     )
 
 
-@router.get("/filter-meta", response_model=FilterMetaOut)
+@router.get("/filter-meta", tags=['Kuitansi'], response_model=FilterMetaOut)
 def filter_meta(
     status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
     db: Session = Depends(get_db),
@@ -442,7 +442,7 @@ def filter_meta(
 
 # ===== Export =====
 
-@router.get("/export")
+@router.get("/export", tags=['Kuitansi'])
 def export_kuitansi(
     format: str = Query("csv", description="csv|xlsx|pdf"),
     date_from: Optional[str] = Query(None),
@@ -501,7 +501,7 @@ def export_kuitansi(
 
 # ===== v1.5-B: Per-kuitansi PDF generator =====
 
-@router.get("/{kuitansi_id}/pdf")
+@router.get("/{kuitansi_id}/pdf", tags=['Kuitansi'])
 def get_kuitansi_pdf(
     kuitansi_id: int,
     db: Session = Depends(get_db),
@@ -1111,7 +1111,7 @@ class RecomputePorsiSingleOut(BaseModel):
     audit_log_id: int
 
 
-@router.post("/{kuitansi_id}/recompute-porsi", response_model=RecomputePorsiSingleOut)
+@router.post("/{kuitansi_id}/recompute-porsi", tags=['Kuitansi'], response_model=RecomputePorsiSingleOut)
 def recompute_porsi_single(
     kuitansi_id: int,
     db: Session = Depends(get_db),

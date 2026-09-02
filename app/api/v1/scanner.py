@@ -53,7 +53,7 @@ class BatchResultOut(BaseModel):
     items: List[BatchItemOut]
 
 
-@router.post("/batch-upload", response_model=BatchResultOut)
+@router.post("/batch-upload", tags=['Scanner'], response_model=BatchResultOut)
 async def batch_upload(
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
@@ -134,7 +134,7 @@ def _get_persentase(db: Session, tenant: Tenant) -> dict:
     return {"pct_x_jemaat": 1.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0}
 
 
-@router.post("/save-batch", response_model=OcrBatchSaveOut)
+@router.post("/save-batch", tags=['Scanner'], response_model=OcrBatchSaveOut)
 def save_ocr_batch(
     payload: OcrBatchSaveIn,
     db: Session = Depends(get_db),

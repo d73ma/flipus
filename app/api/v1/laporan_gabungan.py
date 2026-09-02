@@ -112,7 +112,7 @@ def _require_role(current_user: dict, allowed: List[str]):
 
 # ===== Endpoint 1: GET JSON ringkasan gabungan =====
 
-@router.get("/laporan/gabungan/{id_rekap_mingguan}", response_model=LaporanGabunganOut)
+@router.get("/laporan/gabungan/{id_rekap_mingguan}", tags=['Laporan'], response_model=LaporanGabunganOut)
 def get_laporan_gabungan(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),
@@ -232,7 +232,7 @@ def get_laporan_gabungan(
 
 # ===== Endpoint 2: GET PDF gabungan =====
 
-@router.get("/laporan/gabungan/{id_rekap_mingguan}/pdf")
+@router.get("/laporan/gabungan/{id_rekap_mingguan}/pdf", tags=['Laporan'])
 def get_laporan_gabungan_pdf(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),
@@ -326,7 +326,7 @@ def get_laporan_gabungan_pdf(
 
 # ===== Endpoint 3: POST send-to-auditor (WA blast) =====
 
-@router.post("/laporan/gabungan/{id_rekap_mingguan}/send-to-auditor", response_model=SendToAuditorOut)
+@router.post("/laporan/gabungan/{id_rekap_mingguan}/send-to-auditor", tags=['Laporan'], response_model=SendToAuditorOut)
 def send_laporan_gabungan_to_auditor(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),

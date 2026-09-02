@@ -38,7 +38,7 @@ def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     return user
 
-@router.post("/upload")
+@router.post("/upload", tags=['Sync'])
 def upload_sync(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Jemaat push anonymized kuitansi ke sync_outbox."""
     if user.role not in ("BENDAHARA", "KETUA_KEUANGAN"):
@@ -73,7 +73,7 @@ def upload_sync(db: Session = Depends(get_db), user: User = Depends(get_current_
     db.commit()
     return {"status": "ok", "tenant_id": tenant.id, "uploaded": inserted}
 
-@router.get("/pull")
+@router.get("/pull", tags=['Sync'])
 def pull_sync(since: str = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Kantor Misi / Uni pull anonymized payload dari sync_outbox."""
     if user.role not in ("AUDITOR_MISI", "ADMIN_UNI"):

@@ -105,7 +105,7 @@ def _get_callers_misi_or_uni(caller: dict, db: Session) -> tuple[Optional[MisiKo
 
 # ===== GET /users =====
 
-@router.get("", response_model=UsersListOut)
+@router.get("", tags=['Users'], response_model=UsersListOut)
 def list_users(
     role: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -163,7 +163,7 @@ def list_users(
 
 # ===== DELETE /users/{user_id} =====
 
-@router.delete("/{user_id}", response_model=DeleteUserOut)
+@router.delete("/{user_id}", tags=['Users'], response_model=DeleteUserOut)
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),

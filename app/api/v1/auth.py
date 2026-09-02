@@ -347,7 +347,7 @@ def require_roles(*roles: str):
     return checker
 
 
-@router.post("/login")
+@router.post("/login", tags=['Auth'])
 @_rate_limiter.limit("10/minute")  # FASE 3 K1: anti-brute-force per-IP
 def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
     """
@@ -612,7 +612,7 @@ def _persist_refresh_token(db: Session, refresh_jwt: str, user: User, request: R
         db.rollback()
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordOut)
+@router.post("/forgot-password", tags=['Auth'], response_model=ForgotPasswordOut)
 @_rate_limiter.limit("3/minute")  # FASE 3 K1: anti-enumeration per-IP
 def forgot_password(
     data: ForgotPasswordIn,
@@ -767,7 +767,7 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
-@router.post("/refresh", response_model=TokenOut)
+@router.post("/refresh", tags=['Auth'], response_model=TokenOut)
 @_rate_limiter.limit("30/minute")
 def refresh(
     data: RefreshIn,
@@ -889,7 +889,7 @@ def refresh(
     )
 
 
-@router.post("/logout", response_model=LogoutOut)
+@router.post("/logout", tags=['Auth'], response_model=LogoutOut)
 def logout(
     request: Request,
     current: dict = Depends(get_current_user),
@@ -984,7 +984,7 @@ class ChangePasswordOut(BaseModel):
     message: str
 
 
-@router.post("/change-password", response_model=ChangePasswordOut)
+@router.post("/change-password", tags=['Auth'], response_model=ChangePasswordOut)
 def change_password(
     data: ChangePasswordIn,
     request: Request,
