@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # untuk demo offline multi-device di Wi-Fi lokal.
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
+    # ===== FASE 3-S3.S1 — Logging =====
+    # Log level untuk root logger. Valid: DEBUG, INFO, WARNING, ERROR.
+    # Default INFO untuk production. Set DEBUG via env LOG_LEVEL=DEBUG untuk
+    # verbose development. JSONFormatter handles structure (see app/core/logger.py).
+    LOG_LEVEL: str = "INFO"
+
     # ===== Admin endpoints (v1.5) =====
     # Shared secret untuk endpoint kritis (POST /seed, /register-tenant, /restore-db).
     # Set via ADMIN_BOOTSTRAP_TOKEN di .env (generate dengan `openssl rand -hex 32`).

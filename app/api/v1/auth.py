@@ -315,6 +315,13 @@ def get_current_user(
         ensure_slug(db, tenant)
         db.commit()
 
+    # FASE 3-S3.S1 — update request-scoped contextvars so every subsequent
+    # log line emitted during this request carries tenant_id + user_id.
+    # (request_id was already set by RequestContextMiddleware.)
+    from app.core.logger import tenant_id_var, user_id_var
+    tenant_id_var.set(str(user.tenant_id))
+    user_id_var.set(str(user.id))
+
     return {
         "id": user.id,
         "role": user.role,

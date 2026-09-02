@@ -3,11 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import os
+import sys as _sys_startup
 
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.rate_limiter import limiter as _rate_limiter
+# FASE 3-S3.S1 — centralized JSON structured logging + request context
+from app.core.logger import setup_logging as _setup_logging
+from app.core.request_context import RequestContextMiddleware
+
+# Configure root logger BEFORE app apapun emit log line — supaya even
+# import-time errors dapat JSON-formatted (visible di log aggregator).
+# Level di-resolve dari settings.LOG_LEVEL (env-overridable).
+_setup_logging(level=settings.LOG_LEVEL)
 
 from app.api.v1 import auth, onboarding, scanner, reports, sync, dashboard, register, master, users, admin, agregat, tenants, kuitansi, twofa, notifications, demo, wa_input, quick_input, pengeluaran, pengeluaran_ocr, pengeluaran_wa, laporan_gabungan, m8_managed
 
@@ -81,6 +90,10 @@ Uni Konferens Indonesia Kawasan Timur (UKIKT).
     },
 )
 
+# FASE 3-S3.S1 — RequestContextMiddleware: attach request_id/tenant_id/user_id
+# ke contextvars sehingga JSONFormatter otomatis menyertakan context per request.
+app.add_middleware(RequestContextMiddleware)
+
 # FASE 3 Sprint 1: slowapi rate limiter (K1, K2)
 # Attach limiter ke app.state agar decorator @limiter.limit() bisa akses via state.limiter.
 app.state.limiter = _rate_limiter
@@ -136,23 +149,27 @@ app.include_router(pengeluaran_wa.router, prefix="/api/v1", tags=["Pengeluaran W
 app.include_router(laporan_gabungan.router, prefix="/api/v1", tags=["Laporan Gabungan (v2.0 M7)"])
 app.include_router(m8_managed.router, prefix="/api/v1", tags=["Managed Users + Void (v2.0 M8)"])
 
+# FASE 3-S3.S1 — startup logger (JSONFormatter handles output).
+import logging as _logging_startup
+_startup_log = _logging_startup.getLogger("app.startup")
+
 # === Static files (logos jemaat untuk landing page) ===
 # Folder: storage/logos/*.svg (dibuat otomatis oleh seed_demo.py)
 _STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage")
 if os.path.isdir(_STORAGE_DIR):
     app.mount("/storage", StaticFiles(directory=_STORAGE_DIR), name="storage")
-    print(f"[static] /storage → {_STORAGE_DIR}")
+    _startup_log.info("static_mounted path=/storage dir=%s already_exists=True", _STORAGE_DIR)
 else:
     os.makedirs(_STORAGE_DIR, exist_ok=True)
     app.mount("/storage", StaticFiles(directory=_STORAGE_DIR), name="storage")
-    print(f"[static] /storage created → {_STORAGE_DIR}")
+    _startup_log.info("static_mounted path=/storage dir=%s already_exists=False created_now=True", _STORAGE_DIR)
 
 # === Start scheduler (background) ===
 from app.services.reset_scheduler import start_scheduler
 try:
     reset_scheduler = start_scheduler()
-except Exception:
-    pass
+except Exception as _sched_exc:
+    _startup_log.warning("scheduler_start_failed exc=%s msg=%s", type(_sched_exc).__name__, _sched_exc)
 
 # === Auto-create missing tables (idempotent) ===
 # Beberapa tabel (sync_outbox dll) mungkin belum ter-create kalau
@@ -161,10 +178,9 @@ except Exception:
 from app.core.database import Base, engine
 try:
     Base.metadata.create_all(bind=engine)
-    print("[startup] Base.metadata.create_all() OK")
-except Exception as e:
-    import sys as _sys
-    print(f"[startup] create_all gagal: {e}", file=_sys.stderr)
+    _startup_log.info("create_all_ok")
+except Exception as _create_exc:
+    _startup_log.error("create_all_failed exc=%s msg=%s", type(_create_exc).__name__, _create_exc)
 
 @app.get("/")
 def root():
