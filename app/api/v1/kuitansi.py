@@ -37,6 +37,7 @@ if TYPE_CHECKING:  # S4-D.R1: import InstrumentedAttribute only untuk mypy (runt
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.security import decrypt_pii
+from app.core.tenant_scope import TenantScope, require_tenant_scope
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
 from app.models.master import MisiKonferens, Uni, PersentaseConfig
@@ -149,36 +150,6 @@ def _decrypt_kuitansi_fields(k: Kuitansi, db: Session = None, current: dict = No
                 pass
 
     return {"nama_umat": nama_umat, "nomor_whatsapp": nomor_wa}
-
-
-def _get_visible_tenant_ids(db: Session, current: dict) -> List[int]:
-    """Return list of tenant IDs visible to caller."""
-    role = current["role"]
-    caller_tenant = db.query(Tenant).filter(Tenant.id == current["tenant_id"]).first()
-
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        return [caller_tenant.id] if caller_tenant else []
-
-    if role == "AUDITOR_MISI":
-        if not caller_tenant or not caller_tenant.misi_konferens_id:
-            return []
-        return [t.id for t in db.query(Tenant).filter(
-            Tenant.misi_konferens_id == caller_tenant.misi_konferens_id
-        ).all()]
-
-    if role == "ADMIN_UNI":
-        if not caller_tenant or not caller_tenant.nama_uni:
-            return []
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            return []
-        # Semua misi di uni tsb
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        return [t.id for t in db.query(Tenant).filter(
-            Tenant.misi_konferens_id.in_(misi_ids)
-        ).all()]
-
-    return []
 
 
 def _build_filters(
@@ -305,12 +276,16 @@ def search_kuitansi(
     sort_order: str = Query("desc", description="asc|desc"),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Advanced search kuitansi dengan multiple filters.
 
     T23-1: Default status_filter='finalized' (hanya approved).
     Gunakan status_filter='all' untuk lihat draft juga (Bendahara/Auditor).
+
+    FASE4-S5B: Pakai require_tenant_scope dependency — cross-tenant isolation
+    otomatis dari app.core.tenant_scope (single source of truth).
 
     Returns:
         items: list of matching kuitansi (decrypted)
@@ -320,7 +295,7 @@ def search_kuitansi(
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
 
     # Build base query
     filters, _ = _build_filters(
@@ -403,12 +378,17 @@ def filter_meta(
     status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """Return aggregate stats untuk current filter context. Useful untuk chart awal."""
+    """Return aggregate stats untuk current filter context. Useful untuk chart awal.
+
+    FASE4-S5B: require_tenant_scope guarantees non-empty visible_tenant_ids
+    (403 raised upstream jika scope kosong).
+    """
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
     if not visible_tenant_ids:
         return FilterMetaOut(
             total_kuitansi=0, total_x=0, total_pt=0, total_khusus=0,
@@ -462,6 +442,7 @@ def export_kuitansi(
     id_rekap: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Export filtered kuitansi ke CSV, Excel, atau PDF.
@@ -471,13 +452,15 @@ def export_kuitansi(
     T73: tambah format=pdf untuk backup/archive list kuitansi (landscape, branding-aware).
 
     Digunakan oleh Auditor/Admin untuk analisis offline (spreadsheet) atau arsip PDF.
+
+    FASE4-S5B: tenant scoping via require_tenant_scope dependency.
     """
     if format not in ("csv", "xlsx", "pdf"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "format harus 'csv'|'xlsx'|'pdf'")
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
 
     filters, _ = _build_filters(
         db, visible_tenant_ids,
@@ -514,6 +497,7 @@ def get_kuitansi_pdf(
     kuitansi_id: int,
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v1.5-B: Generate single-kuitansi PDF (FLIPUS branding, A4 portrait).
@@ -525,6 +509,8 @@ def get_kuitansi_pdf(
 
     RBAC: tenant-scoped (BENDAHARA/PENDETA own tenant, AUDITOR/ADMIN uni-scope).
     T89: PII masking — non-BENDAHARA/PENDETA dapat masked.
+
+    FASE4-S5B: require_tenant_scope ensures cross-tenant isolation at SQL level.
     """
     from fastapi.responses import StreamingResponse
     from app.utils.number_to_words import rupiah_to_words
@@ -542,8 +528,8 @@ def get_kuitansi_pdf(
             "reportlab belum terinstall — pip install reportlab",
         )
 
-    # Fetch kuitansi dengan tenant-scope RBAC
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    # Fetch kuitansi dengan tenant-scope RBAC (FASE4-S5B: dari require_tenant_scope)
+    visible_tenant_ids = scope.visible_tenant_ids
     k = db.query(Kuitansi).filter(
         Kuitansi.id == kuitansi_id,
         Kuitansi.tenant_id.in_(visible_tenant_ids),
