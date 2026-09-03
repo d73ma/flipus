@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -80,10 +83,13 @@ def _require_bendahara(current_user: dict):
 @router.get("/sabat-info", tags=['Reports'], response_model=SabatInfoOut)
 def get_sabat_info_endpoint(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Info Sabat untuk tanggal hari ini.
+
+    FASE4-S6C: pakai TenantScope. next_urutan_hint dihitung dari visible tenants
+    caller (own tenant untuk jemaat-scoped role, semua jemaat untuk ADMIN_UNI).
 
     Return:
         sabat_ke: Sabat ke-N dalam tahun (1, 2, 3, ...)
@@ -103,7 +109,7 @@ def get_sabat_info_endpoint(
     # Hitung hint urutan berikutnya (existing kuitansi di tanggal_sabat ini + 1)
     existing_count = (
         db.query(Kuitansi)
-        .filter(Kuitansi.tenant_id == current_user["tenant_id"])
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.tanggal_sabat == info["tanggal_sabat"])
         .filter(Kuitansi.is_purged == False)
         .count()
@@ -131,9 +137,11 @@ def laporan_mingguan(
     id_rekap_mingguan: str,
     status_filter: str = "finalized",  # T23-1: 'finalized'|'draft'|'all'
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """Rekap per minggu/Sabat (satu id_rekap_mingguan).
+
+    FASE4-S6C: pakai TenantScope — filter ke visible tenants caller.
 
     T23-1: Approval Workflow
     - status_filter='finalized' (default): hanya kuitansi yang sudah approved
@@ -143,7 +151,7 @@ def laporan_mingguan(
     q = (
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Kuitansi.tenant_id == current_user["tenant_id"])
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
     )
     if status_filter == "finalized":
         q = q.filter(Kuitansi.status == "finalized")

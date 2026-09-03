@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import encrypt_pii, decrypt_pii
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.api.v1.auth import get_current_user
 from app.utils.sabat_counter import get_current_sabat, get_sabat_info, get_effective_sabat_for_input
 from app.utils.nomor_kuitansi import generate_nomor_kuitansi, generate_id_rekap_mingguan
@@ -625,46 +628,29 @@ def reject_kuitansi(
 @router.get("/kuitansi/pending", tags=['Dashboard'], response_model=PendingListOut)
 def list_pending_kuitansi(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     List kuitansi yang menunggu approval (status='draft').
 
-    - KETUA_KEUANGAN: jemaat sendiri
-    - ADMIN_UNI: semua jemaat di uni
+    FASE4-S6C: pakai TenantScope — single source of truth (gantikan inline
+    role-branch yang duplikat logika resolve_tenant_scope).
+
+    Scope otomatis dari role caller:
+    - BENDAHARA / KETUA_KEUANGAN: own tenant
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
+    - PENDETA / AUDITOR_MISI: tidak eligible
     """
-    if current_user["role"] not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
+    if scope.role not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak eligible")
 
-    # Scope tenant IDs
-    if current_user["role"] == "BENDAHARA":
-        # Bendahara: lihat draft miliknya sendiri (untuk koreksi)
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
-    elif current_user["role"] == "KETUA_KEUANGAN":
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
-    else:  # ADMIN_UNI
-        from app.models.master import Uni, MisiKonferens
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.nama_uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Uni tidak terdefinisi")
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Uni not found")
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id.in_(misi_ids)).all()]
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id.in_(tenant_ids),
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
+    q = (
+        db.query(Kuitansi)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(Kuitansi.status == "draft")
+        .filter(Kuitansi.is_purged == False)
+        .order_by(Kuitansi.created_at.desc())
+    )
 
     rows = q.all()
 
@@ -690,39 +676,28 @@ def list_pending_kuitansi(
 @router.get("/kuitansi/rejected", tags=['Dashboard'])
 def list_rejected_kuitansi(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     List kuitansi yang di-reject (untuk Bendahara lihat & koreksi).
 
-    - BENDAHARA: jemaat sendiri
-    - KETUA_KEUANGAN: jemaat sendiri
-    - ADMIN_UNI: semua jemaat di uni
+    FASE4-S6C: pakai TenantScope — single source of truth.
+
+    Scope otomatis dari role caller:
+    - BENDAHARA / KETUA_KEUANGAN: own tenant
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
+    - PENDETA / AUDITOR_MISI: tidak eligible
     """
-    if current_user["role"] not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
+    if scope.role not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak eligible")
 
-    if current_user["role"] in ("BENDAHARA", "KETUA_KEUANGAN"):
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "rejected",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.rejected_at.desc())
-    else:
-        from app.models.master import Uni, MisiKonferens
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.nama_uni:
-            return {"items": [], "total": 0}
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            return {"items": [], "total": 0}
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id.in_(misi_ids)).all()]
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id.in_(tenant_ids),
-            Kuitansi.status == "rejected",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.rejected_at.desc())
+    q = (
+        db.query(Kuitansi)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(Kuitansi.status == "rejected")
+        .filter(Kuitansi.is_purged == False)
+        .order_by(Kuitansi.rejected_at.desc())
+    )
 
     rows = q.all()
 
