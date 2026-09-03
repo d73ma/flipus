@@ -31,6 +31,10 @@ from app.services import backup_service
 from app.utils.porsi_calculator import compute_porsi
 from app.services.notification_service import create_notification, EventType
 from app.services.whatsapp import get_device_status
+# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 
 router = APIRouter()
 
@@ -356,7 +360,7 @@ class RecomputePorsiOut(BaseModel):
 def recompute_porsi_all(
     tenant_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Recompute porsi_kantor_misi + porsi_kas_jemaat + porsi_khusus_* untuk semua kuitansi existing,
@@ -365,30 +369,32 @@ def recompute_porsi_all(
     Berguna setelah Auditor/Admin Ubah persentase pembagian dan ingin apply ke data historis juga.
 
     Args:
-        tenant_id: optional — kalau None, recompute semua tenant di Uni caller.
-                   Kalau diisi, recompute cuma tenant tsb (harus dalam Uni caller).
+        tenant_id: optional — kalau None, recompute semua tenant yang visible ke caller.
+                   Kalau diisi, recompute cuma tenant tsb (harus dalam scope caller).
 
     RBAC: ADMIN_UNI only.
     """
-    if current_user["role"] != "ADMIN_UNI":
+    if scope.role != "ADMIN_UNI":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni (Jerry)")
+
+    # FASE 4 S6-F: gunakan scope.visible_tenant_ids (single source of truth)
+    # daripada inline query Tenant.nama_uni == caller.nama_uni.
+    if not scope.visible_tenant_ids:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Caller belum terkait Uni / tidak ada tenant visible",
+        )
 
     # Determine tenant scope
     if tenant_id is not None:
-        target = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if not target:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant tidak ditemukan")
-        caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller or target.nama_uni != caller.nama_uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Tenant di luar Uni Anda")
+        if tenant_id not in scope.visible_tenant_ids:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Tenant di luar Uni Anda",
+            )
         tenant_ids = [tenant_id]
     else:
-        caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller or not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait Uni")
-        tenant_ids = [
-            t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()
-        ]
+        tenant_ids = list(scope.visible_tenant_ids)
 
     processed = 0
     updated = 0
@@ -460,7 +466,7 @@ def recompute_porsi_all(
                 action="recompute_porsi",
                 porsi_dana_misi=new_kantor_misi,
                 payload_hash=(
-                    f"user={current_user['id']}|"
+                    f"user={scope.user_id}|"
                     f"old_misi={old_misi}|old_jemaat={old_jemaat}|"
                     f"new_misi={new_kantor_misi}|new_jemaat={new_kas_jemaat}|"
                     f"cfg=pct_x_j={cfg_x},pct_pt_j={cfg_pt},pct_kh_j={cfg_kh},"
@@ -472,8 +478,8 @@ def recompute_porsi_all(
     # FASE 2 S6/R5: per-kuitansi audit log sudah ditulis di dalam loop.
     # Summary batch log tetap dicatat agar mudah difilter di AuditLog page.
     db.add(AuditLog(
-        tenant_id=current_user["tenant_id"],
-        action=f"RECOMPUTE_PORSI_BATCH_user_{current_user['id']}",
+        tenant_id=scope.primary_tenant_id,
+        action=f"RECOMPUTE_PORSI_BATCH_user_{scope.user_id}",
         payload_hash=(
             f"batch|processed={processed}|updated={updated}|"
             f"tenants={tenant_ids}"

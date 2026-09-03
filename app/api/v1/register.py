@@ -8,6 +8,15 @@ POST /api/v1/register/admin      — daftar Admin Uni
 Setelah submit, user otomatis dibuat dengan random password.
 Password ditampilkan SEKALI di response, dan dikirim via Fonnte
 ke nomor WA yang diisi saat submit.
+
+FASE 4 Sprint 6-F note:
+Endpoint-endpoint di file ini SENGAJA public (tanpa `Depends(get_current_user)` /
+`Depends(require_tenant_scope)`) — design-nya adalah pre-auth self-service
+registration. Query `Tenant.nama_uni == uni.nama_resmi` di /admin (L384) adalah
+**legitimate data lookup** (mencari parent tenant untuk Uni tsb), BUKAN
+tenant-isolation filter. Audit FASE4-S6 meng-flag ini, tapi setelah review
+diklasifikasikan sebagai **false positive** — tidak perlu dimigrasi ke
+`require_tenant_scope` karena akan BREAK alur public registration.
 """
 
 from typing import Optional

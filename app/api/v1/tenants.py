@@ -46,6 +46,10 @@ from app.services.branding_service import (
     STORAGE_ROOT,
 )
 from app.core.upload_validator import validate_logo
+# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 
 router = APIRouter()
 
@@ -213,26 +217,27 @@ def get_my_tenant(
 @router.get("", tags=['Tenants'], response_model=TenantsListOut)
 def list_tenants(
     db: Session = Depends(get_db),
-    current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
-    List tenants in caller's uni (ADMIN_UNI only).
-    AUDITOR_MISI: only tenant in their misi.
+    List tenants visible to caller.
+    ADMIN_UNI: semua jemaat di uni caller.
+    AUDITOR_MISI: semua jemaat di misi caller.
+
+    FASE 4 S6-F: gunakan scope.visible_tenant_ids (single source of truth)
+    menggantikan inline `nama_uni == caller_uni.nama_resmi` dan
+    `misi_konferens_id == caller_tenant.misi_konferens_id`.
     """
-    if current["role"] not in ("ADMIN_UNI", "AUDITOR_MISI"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role ini tidak boleh list tenant")
+    if scope.role not in ("ADMIN_UNI", "AUDITOR_MISI"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Role ini tidak boleh list tenant",
+        )
 
-    q = db.query(Tenant)
+    if not scope.visible_tenant_ids:
+        # Caller tidak punya akses ke tenant manapun (e.g. auditor belum terkait misi).
+        return TenantsListOut(tenants=[], count=0)
 
-    if current["role"] == "ADMIN_UNI":
-        uni = _caller_uni(db, current)
-        # Tenants dengan nama_uni = uni ini
-        q = q.filter(Tenant.nama_uni == uni.nama_resmi)
-    else:  # AUDITOR_MISI
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Auditor belum terkait Misi")
-        q = q.filter(Tenant.misi_konferens_id == caller_tenant.misi_konferens_id)
+    q = db.query(Tenant).filter(Tenant.id.in_(scope.visible_tenant_ids))
 
     tenants = q.order_by(Tenant.nama_jemaat_lokal).all()
     return TenantsListOut(

@@ -240,11 +240,27 @@ class TestTenantAdminEndpoints:
     """ADMIN_UNI can list/update tenant status/plan."""
 
     def _setup_admin_uni(self, db):
-        """Create Uni + Admin Uni user + 2 tenants."""
+        """Create Uni + Misi + Admin Uni user + 2 tenants.
+
+        FASE 4 S6-F: tambah MisiKonferens chain agar TenantScope untuk ADMIN_UNI
+        bisa resolve visible_tenant_ids via Uni → MisiKonferens → Tenant.
+        Tanpa misi record, `visible_tenant_ids` = [] → 403.
+        """
         uni = Uni(nama_resmi="UKIKT", kode="UKIKT")
         db.add(uni)
         db.commit()
         db.refresh(uni)
+
+        # Misi placeholder (chain Uni → Misi → Tenant untuk TenantScope)
+        misi = MisiKonferens(
+            uni_id=uni.id,
+            nama_resmi="Daerah Konferens Minahasa",
+            kode="DKMI",
+            jenis="MISI",
+        )
+        db.add(misi)
+        db.commit()
+        db.refresh(misi)
 
         # Admin placeholder tenant
         admin_tenant = Tenant(
@@ -270,9 +286,15 @@ class TestTenantAdminEndpoints:
         db.add(admin)
         db.commit()
 
-        # 2 jemaat tenants
+        # 2 jemaat tenants (attach ke misi via misi_konferens_id)
         t_a = _create_tenant(db, "nataan", "Jemaat Nataan", uni="UKIKT")
+        t_a.misi_konferens_id = misi.id
+        db.commit()
+        db.refresh(t_a)
         t_b = _create_tenant(db, "tombatu", "Jemaat Tombatu", uni="UKIKT")
+        t_b.misi_konferens_id = misi.id
+        db.commit()
+        db.refresh(t_b)
 
         return admin_tenant, admin, t_a, t_b
 
