@@ -1016,7 +1016,7 @@ def agregat_sabat_ini(
         bulan_nama = ""
 
     return SabatIniOut(
-        scope=scope,
+        scope=scope_label,
         sabat_ke=sabat_ke,
         tanggal_sabat=tanggal_sabat,
         hari=info["hari"],
@@ -1193,7 +1193,7 @@ def agregat_ytd(
     # YTD bar uses total Porsi Misi (gabungan X + PT) + KH Misi (Layer 1 only, KH punya logic sendiri)
     # Untuk YtdBarOut: total_porsi_misi_x/pm_pt = langsung dari live calc
     return YtdBarOut(
-        scope=scope,
+        scope=scope_label,
         tahun=tahun,
         sabat_ke=sabat_ke,
         total_perpuluhan=total_x,
@@ -1209,48 +1209,35 @@ def agregat_ytd(
 def chart_mingguan(
     n_weeks: int = 8,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     T34: Chart data perpuluhan 8 minggu terakhir.
 
-    Scope:
-    - BENDAHARA/KETUA_KEUANGAN/PENDETA: tenant caller
+    FASE4-S6B: pakai TenantScope — single source of truth (gantikan inline
+    role-branch di bawah yang duplikat logika resolve_tenant_scope).
+
+    Scope otomatis dari role caller:
+    - BENDAHARA/KETUA_KEUANGAN/PENDETA: own tenant
     - AUDITOR_MISI: semua jemaat di misi caller
-    - ADMIN_UNI: semua jemaat di uni caller
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
     """
     if n_weeks < 1 or n_weeks > 52:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "n_weeks harus 1-52")
 
-    role = current_user["role"]
-    tenant_id = current_user["tenant_id"]
-    caller = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not caller:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant caller tidak ditemukan")
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
 
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        scope = "tenant"
-        tenant_ids = [tenant_id]
-    elif role == "AUDITOR_MISI":
-        scope = "misi"
-        if not caller.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait misi")
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id == caller.misi_konferens_id).all()]
-    elif role == "ADMIN_UNI":
-        scope = "uni"
-        if not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait uni")
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()]
-    else:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak dikenal")
-
-    items = _build_chart_for_tenant_ids(db, tenant_ids, n_weeks)
+    items = _build_chart_for_tenant_ids(db, scope.visible_tenant_ids, n_weeks)
     total_x = sum(i.x for i in items)
     total_pt = sum(i.pt for i in items)
     total_kh = sum(i.khusus for i in items)
 
     return ChartMingguanOut(
-        scope=scope,
+        scope=scope_label,
         n_weeks=n_weeks,
         items=items,
         total_x=total_x,
