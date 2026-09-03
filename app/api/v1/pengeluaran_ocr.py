@@ -24,6 +24,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.core.upload_validator import validate_struk_ocr
 from app.models.pengeluaran import Pengeluaran
 from app.models.kategori_pengeluaran import KategoriPengeluaran
@@ -222,17 +225,24 @@ def _gen_nomor_pengeluaran_inline(db: Session, tenant_id: int, tanggal: str) -> 
 @router.post("/pengeluaran/ocr-save", tags=['Pengeluaran'], response_model=OcrPengeluaranSaveOut)
 def ocr_save(
     body: OcrPengeluaranSaveIn,
-    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """Save single OCR result as draft Pengeluaran. Bendahara wajib review sebelum submit."""
-    if current_user["role"] != "BENDAHARA":
+    """Save single OCR result as draft Pengeluaran. Bendahara wajib review sebelum submit.
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    Hanya BENDAHARA yang eligible; row disimpan ke primary_tenant_id caller.
+    """
+    if scope.role != "BENDAHARA":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Bendahara yang boleh save.")
 
-    tenant_id = current_user["tenant_id"]
+    tenant_id = scope.primary_tenant_id
+    if not tenant_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "User tidak terkait dengan tenant/jemaat")
+
     kat = db.query(KategoriPengeluaran).filter(
         KategoriPengeluaran.id == body.kategori_pengeluaran_id,
-        KategoriPengeluaran.tenant_id == tenant_id,
+        KategoriPengeluaran.tenant_id.in_(scope.visible_tenant_ids),
     ).first()
     if not kat:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kategori tidak ditemukan untuk tenant ini.")
@@ -254,14 +264,14 @@ def ocr_save(
         metode_bayar=body.metode_bayar,
         bukti_path=body.path,
         status='draft',
-        created_by_user_id=current_user["id"],
+        created_by_user_id=scope.user_id,
         created_via='ocr',
     )
     db.add(p)
     db.flush()
     db.add(AuditLog(
         tenant_id=tenant_id,
-        action=f"OCR_PENGELUARAN_SAVE_id_{p.id}_by_user_{current_user['id']}_nomor_{nomor}_jumlah_{body.jumlah}_kategori_{kat.nama[:20]}",
+        action=f"OCR_PENGELUARAN_SAVE_id_{p.id}_by_user_{scope.user_id}_nomor_{nomor}_jumlah_{body.jumlah}_kategori_{kat.nama[:20]}",
     ))
     db.commit()
 

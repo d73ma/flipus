@@ -29,6 +29,9 @@ from sqlalchemy import desc, and_, or_, func as sqlfunc
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user, require_roles
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.models.kategori_pengeluaran import KategoriPengeluaran
 from app.models.pengeluaran import Pengeluaran
 
@@ -183,15 +186,15 @@ def _pengeluaran_to_dict(p: Pengeluaran, kategori: Optional[KategoriPengeluaran]
 @router.get("/kategori-pengeluaran/list", tags=['Pengeluaran'], response_model=List[KategoriPengeluaranOut])
 def list_kategori_pengeluaran(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — List kategori pengeluaran aktif untuk tenant user."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    """v2.0 M5 — List kategori pengeluaran aktif untuk tenant user.
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     rows = (
         db.query(KategoriPengeluaran)
-        .filter(KategoriPengeluaran.tenant_id == tenant_id)
+        .filter(KategoriPengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(KategoriPengeluaran.is_aktif == True)
         .order_by(
             KategoriPengeluaran.is_rutin.desc(),
@@ -256,13 +259,13 @@ def list_pengeluaran(
     bulan: Optional[str] = None,  # YYYY-MM
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — List pengeluaran (filter tenant + optional status + optional bulan)."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
-    q = db.query(Pengeluaran).filter(Pengeluaran.tenant_id == tenant_id)
+    """v2.0 M5 — List pengeluaran (filter tenant + optional status + optional bulan).
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
+    q = db.query(Pengeluaran).filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
     if status_filter:
         q = q.filter(Pengeluaran.status == status_filter)
     if bulan:
@@ -520,21 +523,21 @@ def reject_pengeluaran(
 @router.get("/pengeluaran/pending-count", tags=['Pengeluaran'])
 def pending_count(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — Count pending approval untuk badge Ketua/Pendeta dashboard."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        return {"pending_ketua": 0, "pending_pendeta": 0}
+    """v2.0 M5 — Count pending approval untuk badge Ketua/Pendeta dashboard.
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     pending_ketua = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.status == 'pending_approval')
         .scalar()
     )
     pending_pendeta = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.status == 'approved_ketua')
         .scalar()
     )
@@ -545,12 +548,12 @@ def pending_count(
 def rekap_bulanan(
     bulan: str,  # YYYY-MM
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — Rekap bulanan per tenant (untuk dashboard widget)."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    """v2.0 M5 — Rekap bulanan per tenant (untuk dashboard widget).
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     if not re.match(r"^\d{4}-\d{2}$", bulan):
         raise HTTPException(400, "Format bulan harus YYYY-MM")
 
@@ -561,9 +564,9 @@ def rekap_bulanan(
             sqlfunc.sum(Pengeluaran.jumlah).label("total"),
             sqlfunc.count(Pengeluaran.id).label("cnt"),
         )
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.tanggal.like(f"{bulan}%"))
-        .filter(Pengeluaran.status == 'approved')
+        .filter(Pengeluaran.status == "approved")
         .group_by(Pengeluaran.kategori_pengeluaran_id)
         .all()
     )
@@ -602,7 +605,7 @@ def rekap_bulanan(
     # Pending count (any status not approved yet)
     count_pending = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.tanggal.like(f"{bulan}%"))
         .filter(Pengeluaran.status.in_(['pending_approval', 'approved_ketua']))
         .scalar()
