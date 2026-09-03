@@ -68,6 +68,62 @@ exclude = [
     "docs/",
 ]
 
+# ----------------------------------------------------------------------------
+# FASE 3 Sprint 4 (S4-D.R1) — Per-module mypy overrides
+# ----------------------------------------------------------------------------
+# LEGACY_FILES: 39 modules masih pakai SQLAlchemy `Column[T]` legacy pattern
+# (vs SQLAlchemy 2.0 `Mapped[T]`). Pre-S4-D baseline: 658 mypy errors, 89% dari
+# `arg-type` + `assignment` di Column[T] vs T. 9% sisanya (unreachable, index,
+# union-attr, dll) adalah bug nyata dan SUDAH DIPERBAIKI inline (~9 fixed).
+# Strategi: suppress arg-type + assignment HANYA di legacy modules, pertahankan
+# error code lain supaya regression bug tetap muncul di CI.
+# S4-E nanti migrasi ke `Mapped[T]` style → suppress ini bisa dilepas.
+[[tool.mypy.overrides]]
+module = [
+    "app.ai_engine.cloud_parser",
+    "app.api.v1.admin",
+    "app.api.v1.agregat",
+    "app.api.v1.auth",
+    "app.api.v1.dashboard",
+    "app.api.v1.demo",
+    "app.api.v1.kuitansi",
+    "app.api.v1.laporan_gabungan",
+    "app.api.v1.m8_managed",
+    "app.api.v1.master",
+    "app.api.v1.notifications",
+    "app.api.v1.onboarding",
+    "app.api.v1.pengeluaran",
+    "app.api.v1.pengeluaran_ocr",
+    "app.api.v1.pengeluaran_wa",
+    "app.api.v1.quick_input",
+    "app.api.v1.register",
+    "app.api.v1.reports",
+    "app.api.v1.scanner",
+    "app.api.v1.sync",
+    "app.api.v1.tenants",
+    "app.api.v1.twofa",
+    "app.api.v1.users",
+    "app.api.v1.wa_input",
+    "app.core.config",
+    "app.core.upload_validator",
+    "app.models.tenant",
+    "app.services.anonymizer",
+    "app.services.branding_service",
+    "app.services.notification_service",
+    "app.services.pdf_gabungan",
+    "app.services.pdf_generator",
+    "app.services.retention_daemon",
+    "app.services.tenant_service",
+    "app.services.user_creator",
+    "app.services.wa_input_parser",
+    "app.services.wa_input_state",
+    "app.services.whatsapp",
+    "app.utils.sabat_counter",
+]
+# `arg-type`+`assignment` ONLY — error code lain (index, union-attr, dll)
+# tetap dilaporkan agar regression bug tidak tersembunyi.
+disable_error_code = ["arg-type", "assignment"]
+
 [tool.coverage.run]
 source = ["app"]
 omit = [

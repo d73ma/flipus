@@ -506,10 +506,11 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
         if button_id.startswith("btn_pilih_"):
             try:
                 tenant_id = int(button_id.split("_")[-1])
-                chosen = next((t for t in tenants if t.id == tenant_id), None)
+                chosen: Tenant | None = next((t for t in tenants if t.id == tenant_id), None)
                 if not chosen:
                     _send_fonnte_reply(phone, "Jemaat tidak valid. Coba lagi.")
                     return {"status": "ok"}
+                assert chosen is not None  # S4-D.R1: narrow for mypy
                 set_state(db, session, "AWAIT_X", payload={"tenant_id": chosen.id, "nama_jemaat": chosen.nama_jemaat_lokal})
                 _send_fonnte_reply(phone, _reply_await_kategori("X")["message"], _reply_await_kategori("X")["buttons"])
                 db.commit()

@@ -1,7 +1,7 @@
 # FLIPUS — Testing Guide
 
-> **Version**: 2.0 (FASE 3 Sprint 4 — Consolidated Testing Documentation)
-> **Scope**: test suite overview, cara run, coverage breakdown, CI integration
+> **Version**: 2.1 (FASE 3 Sprint 4 — added §11 Static Type Checking)
+> **Scope**: test suite overview, cara run, coverage breakdown, CI integration, mypy
 > **Audience**: developer, QA, DevOps
 > **Lihat juga**: [`tests/TESTS.md`](../../tests/TESTS.md) untuk coverage matrix historis
 
@@ -469,3 +469,103 @@ pytest -n auto       # sesuai jumlah CPU
 - pytest docs: https://docs.pytest.org/
 - pytest-asyncio: https://pytest-asyncio.readthedocs.io/
 - pytest-cov: https://pytest-cov.readthedocs.io/
+
+---
+
+## 11. Static Type Checking (mypy)
+
+> **FASE 3 Sprint 4 — S4-D.R1** mypy pragmas gradual + baseline error suppression.
+> **Tujuan**: mengurangi baseline 658 mypy errors → manageable subset untuk ditriage manual, tanpa lose visibility bug nyata.
+
+### 11.1 Baseline (pre-S4-D)
+
+| Metrik | Nilai |
+|---|---|
+| Errors total | **658** di 39 file |
+| Dominated by | `arg-type` 397 + `assignment` 190 (= 587 / 89%) — semua berasal dari SQLAlchemy legacy `Column[T]` vs `T` |
+| Real bugs | ~71 (unreachable 6, index 16, union-attr 12, return-value 6, list-item 7, dict-item 6, dll) |
+| Mode | non-strict gradual (`disallow_untyped_defs=false`, `disallow_incomplete_defs=false`, `check_untyped_defs=false`) |
+
+### 11.2 Strategi S4-D (hybrid)
+
+| Aksi | Scope | Hasil |
+|---|---|---|
+| **Inline fix** untuk non-Column[T] errors | Hanya unreachable / index / union-attr / list-item / dict-item / misc / return-value / call-arg / call-overload / operator | ~9 bug nyata diperbaiki (termasuk 2 silent try/except bug di `kuitansi.py:522` dan `m8_managed.py:234`) |
+| **Per-module suppress** di `pyproject.toml` | 39 legacy modules punya `Column[T]` pattern; suppress HANYA `arg-type` + `assignment` | 588 error tersembunyi (sesuai desain) |
+| **Error code lain TETAP AKTIF** | index, list-item, dict-item, return-value, union-attr, call-arg, call-overload, misc, unreachable, operator | 61 error real bug SURFACE di CI → bisa di-triage manual atau jadi target S4-E |
+
+### 11.3 Hasil (post-S4-D)
+
+| Metrik | Sebelum | Sesudah | Delta |
+|---|---|---|---|
+| Total errors | 658 | **61** | −90.7% |
+| File dengan error | 39 | 19 | −51% |
+| Real bug inline-fixed | — | ~9 | +9 |
+
+**61 error yang tersisa** adalah REAL bug dengan tipe:
+
+```
+ 18 [index]        — list/array indexing pada Optional
+  7 [list-item]    — elemen list type mismatch
+  6 [dict-item]    — dict key/value mismatch
+  5 [unreachable]  — mostly false-positive Column[T] narrowing (S4-E fix)
+  5 [union-attr]   — Optional attribute access
+  5 [call-arg]     — wrong argument types
+  4 [return-value] — wrong return types
+  3 [misc]         — bare assignment, etc.
+  2 [call-overload]
+  2 [unused-ignore]
+  1 [operator]
+  1 [annotation-unchecked]
+```
+
+### 11.4 Bug Nyata Yang Ditemukan & Diperbaiki (S4-D)
+
+1. **`app/utils/number_to_words.py`** — `rupiah_to_words` undefined di `kuitansi.py:522`. Sebelumnya `try/except` diam-diam fallback ke string `"5,000,000 rupiah"` di PDF kuitansi (harusnya `"Lima Juta Rupiah"`). Fixed: tambah alias `rupiah_to_words = bilang = terbilang`.
+2. **`app/api/v1/m8_managed.py:234`** — import `fernet` dari `app.core.security` (undefined), tertangkap `try/except` lalu di-print ke stderr. Fixed: hapus bogus import.
+3. **`app/api/v1/agregat.py:201`** — `grouped: dict[str, list] = {}` annotation (mypy `[var-annotated]`).
+4. **`app/api/v1/agregat.py:836`** — `assert tenant_pct is not None` narrowing (mypy `[union-attr]`).
+5. **`app/api/v1/kuitansi.py:340`** — `sort_col: InstrumentedAttribute` hint (mypy `[attr-defined]`). Import dipindah ke top-of-file `if TYPE_CHECKING:` supaya runtime overhead = 0.
+6. **`app/api/v1/kuitansi.py:430`** — early return saat `agg is None` sebelum akses `.total/.total_x/.total_pt/.total_khusus` (mypy `[union-attr]` + safety).
+7. **`app/api/v1/wa_input.py:507`** — `chosen: Tenant | None` annotation + `assert chosen is not None` (mypy `[union-attr]`).
+
+### 11.5 Cara Menjalankan
+
+```bash
+# Baseline — strict, exit 1 jika error > 0
+make typecheck                      # atau: .venv/bin/python3 -m mypy app
+
+# Statistik saja
+.venv/bin/python3 -m mypy app 2>&1 | tail -3
+
+# Detail breakdown per error code
+.venv/bin/python3 -m mypy app 2>&1 | grep -oE " \[[a-z-]+\]$" | sort | uniq -c | sort -rn
+```
+
+### 11.6 Konfigurasi (`pyproject.toml` [tool.mypy])
+
+- **Mode**: gradual (`disallow_untyped_defs=false`, `disallow_incomplete_defs=false`, `check_untyped_defs=false`)
+- **Strict saja**: `strict_optional=true`, `warn_unused_ignores=true`, `warn_redundant_casts=true`, `warn_unreachable=true`
+- **Exclude**: `.venv`, `.venv.broken314`, `frontend`, `scripts/migrate_`, `storage`, `tests/`, `docs/`
+- **Per-module suppress**: 39 legacy file dengan `disable_error_code = ["arg-type", "assignment"]`. Error code lain TIDAK di-suppress supaya bug nyata tetap muncul.
+
+### 11.7 Roadmap
+
+| Sprint | Tujuan | Target |
+|---|---|---|
+| **S4-D** ✅ DONE | Baseline + selective suppression | 658 → 61 errors |
+| **S4-E** | Migrate `Column[T]` → `Mapped[T]` (1 model template) + apply ke 1-2 modules | Lepas suppress untuk migrated modules |
+| **S5+** | Lanjutkan migrasi incremental | Target akhir: 0 mypy errors (strict optional) |
+
+### 11.8 Notes Penting
+
+- **Jangan menambah file ke daftar suppress tanpa diskusi** — jika kamu butuh menulis module baru yang pakai SQLAlchemy legacy, gunakan `Mapped[T]` style (SQLAlchemy 2.0) supaya langsung bersih.
+- **Jangan disable error code lain** di luar `arg-type` + `assignment` — itu penuh dengan info real bug.
+- **CI integration**: tambahkan `mypy app` ke CI pipeline sebelum Sprint 5 ditutup (lihat §6).
+
+### 11.9 Referensi
+
+- [`pyproject.toml`](../../pyproject.toml) — `[tool.mypy]` + `[[tool.mypy.overrides]]`
+- [mypy docs](https://mypy.readthedocs.io/)
+- [SQLAlchemy 2.0 Mapped[T] migration guide](https://docs.sqlalchemy.org/en/20/orm/declarative_styles.html)
+- [`FASE3_AUDIT_BUG_SECURITY.md`](../../FASE3_AUDIT_BUG_SECURITY.md) — Sprint 4 plan

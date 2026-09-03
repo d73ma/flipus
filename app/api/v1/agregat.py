@@ -198,7 +198,7 @@ def _aggregate_by_minggu(
     approval). Sekarang recompute dari PersentaseConfig supaya agregat
     reactive terhadap slider changes.
     """
-    grouped = {}
+    grouped: dict[str, list] = {}  # S4-D.R1: type annotation for mypy
     for r in rows:
         if r.id_rekap_mingguan not in grouped:
             grouped[r.id_rekap_mingguan] = []
@@ -834,6 +834,7 @@ def agregat_sabat_ini(
                 tenant_pct.update(uni_pct)
         else:
             tenant_pct = {**PCT_DEFAULTS}
+        assert tenant_pct is not None  # S4-D.R1: narrow Optional[dict] for mypy
 
     if scope == "tenant":
         # Bendahara/Pendeta/Ketua: tampilkan per-kuitansi dengan nama_pemberi

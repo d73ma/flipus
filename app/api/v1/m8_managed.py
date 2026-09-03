@@ -231,9 +231,8 @@ def invite_user(
     # Encrypt WA (v1.5-E pattern) — fallback ke None kalau encrypt_pii tidak ready
     wa_encrypted = None
     try:
-        from app.core.security import encrypt_pii, fernet
-        if fernet is not None:
-            wa_encrypted = encrypt_pii(wa)
+        from app.core.security import encrypt_pii
+        wa_encrypted = encrypt_pii(wa)
     except Exception as exc:  # noqa: BLE001
         print(f"[M8 invite] encrypt_pii skipped: {exc}", file=sys.stderr, flush=True)
         wa_encrypted = None

@@ -23,13 +23,16 @@ RBAC:
 import csv
 import io
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import TYPE_CHECKING, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
+
+if TYPE_CHECKING:  # S4-D.R1: import InstrumentedAttribute only untuk mypy (runtime overhead = 0)
+    from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
@@ -337,8 +340,8 @@ def search_kuitansi(
     # Count before pagination
     total = q.count()
 
-    # Sort
-    sort_col = {
+    # Sort — type hint only (import ada di top-of-file TYPE_CHECKING)
+    sort_col: InstrumentedAttribute = {
         "tanggal_sabat": Kuitansi.tanggal_sabat,
         "nominal": Kuitansi.total_pemberian_angka,
         "created_at": Kuitansi.created_at,
@@ -428,6 +431,11 @@ def filter_meta(
         func.min(Kuitansi.tanggal_sabat).label("min_date"),
         func.max(Kuitansi.tanggal_sabat).label("max_date"),
     ).first()
+    if agg is None:
+        return FilterMetaOut(
+            total_kuitansi=0, total_x=0, total_pt=0, total_khusus=0,
+            total_pemberian=0, date_range_from=None, date_range_to=None,
+        )  # S4-D.R1: handle empty result for mypy + safety
 
     return FilterMetaOut(
         total_kuitansi=agg.total,
