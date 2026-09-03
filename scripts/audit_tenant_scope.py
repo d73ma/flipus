@@ -70,6 +70,12 @@ def analyze_endpoint(node: ast.FunctionDef | ast.AsyncFunctionDef, decorators: L
         if kw in src:
             safe_findings.append(kw)
 
+    # FASE4-S6G: kalau endpoint sudah pakai TenantScope (safe patterns),
+    # `visible_tenant_ids` dll adalah legitimate read via scope — BUKAN inline.
+    has_safe = len(safe_findings) > 0
+    if has_safe:
+        inline_findings = []
+
     return method_path, inline_findings, safe_findings
 
 
