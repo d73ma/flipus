@@ -23,6 +23,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.models.transaction import Kuitansi
 from app.models.pengeluaran import Pengeluaran
 from app.models.kategori_pengeluaran import KategoriPengeluaran
@@ -102,8 +105,9 @@ def _status_to_label(s: str) -> str:
     }.get(s, s)
 
 
-def _require_role(current_user: dict, allowed: List[str]):
-    if current_user.get("role") not in allowed:
+def _require_role(scope: "TenantScope", allowed: List[str]):
+    """FASE4-S6E: helper pakai TenantScope.role (single source of truth)."""
+    if scope.role not in allowed:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"Akses ditolak. Butuh role: {', '.join(allowed)}",
@@ -116,18 +120,21 @@ def _require_role(current_user: dict, allowed: List[str]):
 def get_laporan_gabungan(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """Laporan gabungan per sabat: Kuitansi (penerimaan) + Pengeluaran (pengeluaran) + net saldo.
 
+    FASE4-S6E: pakai TenantScope.visible_tenant_ids (cross-tenant audit aware).
+    Untuk tenant tampilan, pakai primary_tenant_id.
+
     RBAC: Bendahara, Ketua, Pendeta, Auditor Misi (semua role yang terkait tenant ini)
     """
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
+    primary_tenant_id = scope.primary_tenant_id
+    if not primary_tenant_id:
         raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
 
-    # Load tenant
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    # Load tenant (display info)
+    tenant = db.query(Tenant).filter(Tenant.id == primary_tenant_id).first()
     if not tenant:
         raise HTTPException(404, "Tenant not found")
 
@@ -135,7 +142,7 @@ def get_laporan_gabungan(
     kuitansi_rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Kuitansi.tenant_id == tenant_id)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.is_purged == False)
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
@@ -147,7 +154,7 @@ def get_laporan_gabungan(
     pengeluaran_rows = (
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.is_purged == False)
         .filter(Pengeluaran.status != "draft")  # exclude draft
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
@@ -236,21 +243,24 @@ def get_laporan_gabungan(
 def get_laporan_gabungan_pdf(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """Generate PDF laporan gabungan (Kuitansi + Pengeluaran)."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
+    """Generate PDF laporan gabungan (Kuitansi + Pengeluaran).
+
+    FASE4-S6E: pakai TenantScope (visible_tenant_ids + primary_tenant_id).
+    """
+    primary_tenant_id = scope.primary_tenant_id
+    if not primary_tenant_id:
         raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
 
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).filter(Tenant.id == primary_tenant_id).first()
     if not tenant:
         raise HTTPException(404, "Tenant not found")
 
     kuitansi_rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Kuitansi.tenant_id == tenant_id)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.is_purged == False)
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
@@ -259,7 +269,7 @@ def get_laporan_gabungan_pdf(
     pengeluaran_rows = (
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.is_purged == False)
         .filter(Pengeluaran.status != "draft")
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
@@ -303,8 +313,8 @@ def get_laporan_gabungan_pdf(
     # Audit log
     try:
         db.add(AuditLog(
-            tenant_id=tenant_id,
-            action=f"LAPORAN_GABUNGAN_PDF_id_rekap_{id_rekap_mingguan}_by_user_{current_user['id']}_kuitansi_{len(kuitansi_rows)}_pengeluaran_{len(pengeluaran_rows)}",
+            tenant_id=primary_tenant_id,
+            action=f"LAPORAN_GABUNGAN_PDF_id_rekap_{id_rekap_mingguan}_by_user_{scope.user_id}_kuitansi_{len(kuitansi_rows)}_pengeluaran_{len(pengeluaran_rows)}",
         ))
         db.commit()
     except Exception as exc:
@@ -330,27 +340,31 @@ def get_laporan_gabungan_pdf(
 def send_laporan_gabungan_to_auditor(
     id_rekap_mingguan: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """Generate PDF gabungan + kirim via Fonnte ke semua AUDITOR_MISI di tenant.
 
-    RBAC: Bendahara saja (yang punya wewenang share laporan).
+    FASE4-S6E: pakai TenantScope. Auditor dicari di primary_tenant_id caller
+    (WA blast adalah jemaat-specific). Data transaksi mengikuti visible_tenant_ids.
+
+    RBAC: Bendahara / Ketua Keuangan (yang punya wewenang share laporan).
     Kalau 0 auditor ditemukan di tenant → return 400 dengan pesan jelas.
     """
-    _require_role(current_user, ["BENDAHARA", "KETUA_KEUANGAN"])
+    _require_role(scope, ["BENDAHARA", "KETUA_KEUANGAN"])
 
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
+    primary_tenant_id = scope.primary_tenant_id
+    if not primary_tenant_id:
         raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
 
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).filter(Tenant.id == primary_tenant_id).first()
     if not tenant:
         raise HTTPException(404, "Tenant not found")
 
-    # Find auditors in this tenant
+    # Find auditors in this tenant (selalu di primary_tenant_id caller,
+    # bukan visible_tenant_ids — auditor WA-blast adalah jemaat-specific)
     auditors = (
         db.query(User)
-        .filter(User.tenant_id == tenant_id)
+        .filter(User.tenant_id == primary_tenant_id)
         .filter(User.role == "AUDITOR_MISI")
         .filter(User.is_active == True)  # noqa: E712
         .order_by(User.id.asc())
@@ -363,11 +377,12 @@ def send_laporan_gabungan_to_auditor(
             "Tidak ada Auditor Misi terdaftar di jemaat ini. Daftarkan lewat /register/auditor dulu.",
         )
 
-    # Load data
+    # Load data (pakai visible_tenant_ids agar AUDITOR_MISI / ADMIN_UNI
+    # bisa mengirim laporan gabungan lintas jemaat tanpa bocor keluar scope)
     kuitansi_rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Kuitansi.tenant_id == tenant_id)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.is_purged == False)
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
@@ -376,7 +391,7 @@ def send_laporan_gabungan_to_auditor(
     pengeluaran_rows = (
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.is_purged == False)
         .filter(Pengeluaran.status != "draft")
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
@@ -465,10 +480,10 @@ def send_laporan_gabungan_to_auditor(
     # Audit log
     try:
         db.add(AuditLog(
-            tenant_id=tenant_id,
+            tenant_id=primary_tenant_id,
             action=(
                 f"LAPORAN_GABUNGAN_SEND_TO_AUDITOR_id_rekap_{id_rekap_mingguan}"
-                f"_by_user_{current_user['id']}"
+                f"_by_user_{scope.user_id}"
                 f"_auditors_{len(auditors)}_notified_{notified}_skipped_{len(skipped)}"
                 f"_pdf_{pdf_filename}"
             ),

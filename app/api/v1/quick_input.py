@@ -36,6 +36,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.tenant_scope import (
+    TenantScope, require_tenant_scope,
+)
 from app.core.security import encrypt_pii
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
@@ -183,14 +186,17 @@ def _generate_nomor_for_kuitansi(db: Session, tenant: Tenant, tanggal: str) -> s
 def quick_input(
     body: QuickInputRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v2.0 Quick Input endpoint — PWA friendly.
 
+    FASE4-S6E: pakai TenantScope (gantikan inline tenant_id = current_user).
+    Tenant baru di-bind ke primary_tenant_id caller (BENDAHARA selalu single-tenant).
+
     Validasi:
-    - User.role == BENDAHARA
-    - User.tenant_id aktif
+    - scope.role == BENDAHARA
+    - scope.primary_tenant_id aktif
     - Minimal 1 item dengan nominal > 0
     - nama_pemberi: 1-100 char
 
@@ -203,11 +209,10 @@ def quick_input(
     6. Audit log + return response
     """
     # RBAC: hanya Bendahara yang boleh input keuangan
-    role = current_user.get("role")
-    if role != "BENDAHARA":
+    if scope.role != "BENDAHARA":
         raise HTTPException(403, "Hanya Bendahara yang boleh input kuitansi keuangan")
 
-    tenant_id = current_user.get("tenant_id")
+    tenant_id = scope.primary_tenant_id
     if not tenant_id:
         raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
 
@@ -280,7 +285,7 @@ def quick_input(
         # Status (v2.0: DRAFT dulu, approval Ketua→Pendeta)
         # Untuk v1.5 backward-compat, default 'finalized'
         status="finalized",
-        created_by_user_id=current_user.get("id"),
+        created_by_user_id=scope.user_id,
         created_via="pwa",  # v2.0: distinct from 'web'/'ocr'/'wa'
     )
     db.add(k)
@@ -337,7 +342,7 @@ def quick_input(
     # Audit log (pattern: scanner.py — action encode user_id, payload_hash=nomor)
     db.add(AuditLog(
         tenant_id=tenant_id,
-        action=f"QUICK_INPUT_CREATE_user_{current_user.get('id')}_count_{len(pivot_data)}_new_{len(kategori_baru_list)}",
+        action=f"QUICK_INPUT_CREATE_user_{scope.user_id}_count_{len(pivot_data)}_new_{len(kategori_baru_list)}",
         payload_hash=nomor,
         porsi_dana_misi=k.porsi_kantor_misi,
     ))
@@ -366,10 +371,12 @@ class KategoriListItem(BaseModel):
 @router.get("/kategori/list", tags=['QuickInput'], response_model=List[KategoriListItem])
 def list_kategori(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v2.0 M2 — List kategori aktif untuk tenant user (untuk autocomplete UI QuickInput).
+
+    FASE4-S6E: pakai TenantScope.visible_tenant_ids (cross-tenant audit aware).
 
     RBAC: semua role yang sudah login boleh lihat (read-only).
     Auto-create kategori BARU tetap hanya BENDAHARA (lihat endpoint quick-input).
@@ -377,13 +384,12 @@ def list_kategori(
     Return diurutkan: rutin dulu (X, PT) → lalu by urutan → lalu by nama.
     Limit: 100 (cukup untuk dropdown autocomplete).
     """
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    if not scope.visible_tenant_ids:
+        return []
 
     rows = (
         db.query(KategoriPemasukan)
-        .filter(KategoriPemasukan.tenant_id == tenant_id)
+        .filter(KategoriPemasukan.tenant_id.in_(scope.visible_tenant_ids))
         .filter(KategoriPemasukan.is_aktif == True)
         .order_by(
             KategoriPemasukan.is_rutin.desc(),  # rutin (X, PT) di atas
