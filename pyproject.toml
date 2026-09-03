@@ -36,6 +36,10 @@ ignore = [
 "tests/**/*.py" = ["S101", "S105", "S106", "B011"]
 "scripts/**/*.py" = ["T201", "S101", "S105"]
 "app/core/logging_config.py" = ["T201"]  # formatter emits via logging, not print
+# Models pakai `Optional[T]` (bukan `T | None`) untuk konsistensi dengan
+# service/api code base. Lihat commit S4-E (audit FASE 3).
+"app/models/*.py" = ["UP007"]
+"app/models/__init__.py" = ["UP007"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "tests"]
@@ -69,15 +73,16 @@ exclude = [
 ]
 
 # ----------------------------------------------------------------------------
-# FASE 3 Sprint 4 (S4-D.R1) — Per-module mypy overrides
+# FASE 3 Sprint 4 (S4-D.R1 + S4-E) — Per-module mypy overrides
 # ----------------------------------------------------------------------------
-# LEGACY_FILES: 39 modules masih pakai SQLAlchemy `Column[T]` legacy pattern
+# LEGACY_FILES: 38 modules masih pakai SQLAlchemy `Column[T]` legacy pattern
 # (vs SQLAlchemy 2.0 `Mapped[T]`). Pre-S4-D baseline: 658 mypy errors, 89% dari
 # `arg-type` + `assignment` di Column[T] vs T. 9% sisanya (unreachable, index,
 # union-attr, dll) adalah bug nyata dan SUDAH DIPERBAIKI inline (~9 fixed).
 # Strategi: suppress arg-type + assignment HANYA di legacy modules, pertahankan
 # error code lain supaya regression bug tetap muncul di CI.
-# S4-E nanti migrasi ke `Mapped[T]` style → suppress ini bisa dilepas.
+# S4-E sudah migrasi `app.models.tenant` ke `Mapped[T]` style → dilepas dari list.
+# Sprint berikutnya (S4-F+) akan migrasi model lain satu per satu.
 [[tool.mypy.overrides]]
 module = [
     "app.ai_engine.cloud_parser",
@@ -106,7 +111,6 @@ module = [
     "app.api.v1.wa_input",
     "app.core.config",
     "app.core.upload_validator",
-    "app.models.tenant",
     "app.services.anonymizer",
     "app.services.branding_service",
     "app.services.notification_service",

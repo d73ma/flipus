@@ -1,7 +1,7 @@
 # FLIPUS — Testing Guide
 
-> **Version**: 2.1 (FASE 3 Sprint 4 — added §11 Static Type Checking)
-> **Scope**: test suite overview, cara run, coverage breakdown, CI integration, mypy
+> **Version**: 2.2 (FASE 3 Sprint 4 — added §12 SQLAlchemy Mapped[T] migration template)
+> **Scope**: test suite overview, cara run, coverage breakdown, CI integration, mypy, Mapped[T] migration
 > **Audience**: developer, QA, DevOps
 > **Lihat juga**: [`tests/TESTS.md`](../../tests/TESTS.md) untuk coverage matrix historis
 
@@ -569,3 +569,146 @@ make typecheck                      # atau: .venv/bin/python3 -m mypy app
 - [mypy docs](https://mypy.readthedocs.io/)
 - [SQLAlchemy 2.0 Mapped[T] migration guide](https://docs.sqlalchemy.org/en/20/orm/declarative_styles.html)
 - [`FASE3_AUDIT_BUG_SECURITY.md`](../../FASE3_AUDIT_BUG_SECURITY.md) — Sprint 4 plan
+
+---
+
+## 12. SQLAlchemy 2.0 Mapped[T] Migration Template (S4-E)
+
+> **FASE 3 Sprint 4 — S4-E.R3** Kolaborasi parsial dari SQLAlchemy `Column[T]` legacy
+> ke SQLAlchemy 2.0 `Mapped[T]` style. Tujuan: lepas suppress module dari
+> `[[tool.mypy.overrides]]` (lihat §11) tanpa lose type safety.
+
+### 12.1 Mengapa Mapped[T]?
+
+| Aspek | `Column[T]` (legacy, 1.x) | `Mapped[T]` (2.0+) |
+|---|---|---|
+| Type annotation | None (atau di comment) | Eksplisit via Python type hint |
+| mypy inference | `Column[T]` ≠ `T` → `arg-type`/`assignment` errors | `Mapped[T]` = `T` → mypy happy |
+| IDE autocomplete | `Tenant.tenant_signature` → `Column[str]` (no methods) | `Tenant.tenant_signature` → `str` (full methods) |
+| Runtime behavior | Sama | Sama (kwargs diteruskan ke `mapped_column`) |
+| Future-proof | Deprecated di SQLAlchemy 2.1+ | Recommended style |
+
+### 12.2 Strategi Migrasi S4-E
+
+Karena semua 38 legacy models di suppress list, migrasi parsial dilakukan satu per satu,
+dimulai dari model yang **paling kecil + isolated blast radius** untuk minimize risk.
+
+Kriteria pemilihan model template:
+1. **Paling sedikit kolom** (cepat dimigrasi & direview)
+2. **Paling beragam tipe kolom** (String, Integer, Boolean, DateTime, FK)
+3. **Sedikit consumer modules** (supaya blast radius kecil)
+4. **No `relationship()`** (fokus migrasi cukup di columns dulu)
+
+**Model pertama yang dimigrasi**: [`app/models/tenant.py`](../../app/models/tenant.py)
+- 26 kolom, tipe beragam (int, str, Optional[str], Optional[int], bool, datetime)
+- 3 consumer modules: `tenants.py`, `users.py`, `tenant_service.py`
+- Tidak ada `relationship()` — fokus murni di columns
+
+### 12.3 Pattern Migrasi (Template)
+
+**Sebelum** (legacy `Column[T]`):
+```python
+from sqlalchemy import Column, Integer, String, DateTime
+from app.core.database import Base
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    email = Column(String(120), unique=True, nullable=False)
+    full_name = Column(String(120))
+    created_at = Column(DateTime, server_default=func.now())
+```
+
+**Sesudah** (SQLAlchemy 2.0 `Mapped[T]`):
+```python
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    full_name: Mapped[Optional[str]] = mapped_column(String(120), default=None)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+```
+
+### 12.4 Konvensi Penting
+
+1. **Import minimal**: Hanya import type SQLAlchemy yang dipakai di `mapped_column()`.
+   `Integer` biasanya TIDAK perlu di-import karena mypy infer dari `Mapped[Optional[int]]`.
+2. **`default=None`** ditambahkan eksplisit untuk nullable columns (best practice 2.0).
+   Tidak mengubah schema — hanya Python-side default.
+3. **`Mapped[Optional[T]]`** untuk nullable columns, **`Mapped[T]`** untuk non-nullable.
+4. **`Mapped[datetime]`** (bukan `Mapped[Optional[datetime]]`) untuk kolom dengan
+   `server_default=func.now()` — karena server selalu set nilainya.
+5. **`Mapped[bool]`** untuk kolom dengan `default=True/False` literal.
+6. **`@property` methods** tidak berubah — domain logic terpisah dari column typing.
+
+### 12.5 Verification Checklist (per model yang dimigrasi)
+
+Setelah migrasi 1 model, SELALU jalankan:
+
+```bash
+# 1. Compile check (runtime behavior)
+.venv/bin/python -c "from app.models.<nama> import <Model>; print('<Model> loaded OK')"
+
+# 2. Mypy — harus ZERO errors untuk model yang baru dimigrasi
+.venv/bin/mypy app/ 2>&1 | grep "app/models/<nama>" && echo "FAIL" || echo "✓ ZERO mypy errors"
+
+# 3. Lihat total error count (harus TURUN dari sebelumnya)
+.venv/bin/mypy app/ 2>&1 | tail -3
+
+# 4. Ruff lint
+.venv/bin/ruff check app/models/<nama>.py
+
+# 5. Regression test
+.venv/bin/python -m pytest tests/ -q
+
+# 6. Lepas dari suppress list di pyproject.toml
+# (edit [[tool.mypy.overrides]] module list, hapus "app.models.<nama>")
+```
+
+### 12.6 Hasil S4-E (Model Pertama: `app/models/tenant.py`)
+
+| Metrik | Sebelum S4-E | Sesudah S4-E | Delta |
+|---|---|---|---|
+| Total mypy errors | 61 | **56** | −5 (−8.2%) |
+| `app/models/tenant.py` errors | (suppressed) | **0** | ✅ ZERO |
+| Suppress list size | 39 modules | **38 modules** | −1 |
+| Tests pass rate | 166/166 | **166/166** | 0% change |
+| Total kolom dimigrasi | — | **26 kolom** | +26 typed |
+
+### 12.7 Migrasi Lanjutan (Roadmap)
+
+| Sprint | Target | Effort |
+|---|---|---|
+| **S4-E ✅** | `tenant.py` (template) | 1 model, 26 kolom |
+| **S5.x** | `user.py`, `refresh_token.py`, `revoked_token.py` (auth cluster) | 3 models |
+| **S5.x** | `transaction.py`, `pengeluaran.py`, `kategori_pemasukan.py`, `kategori_pengeluaran.py` (tx cluster) | 4 models |
+| **S5.x** | `master.py`, `audit.py`, `blast_job.py`, `notification.py`, `sync.py`, `wa_session.py` (utility) | 6 models |
+| **End state** | 14/14 models migrated, suppress list dihapus entirely | 0 mypy errors (strict optional) |
+
+### 12.8 Catatan & Risiko
+
+- **Schema TIDAK berubah** — migrasi hanya type annotation Python side.
+  DDL sama persis dengan `Column[T]` legacy, jadi tidak perlu migration script Alembic.
+- **Backwards compatibility** — kode yang sudah ada (`Tenant.id`, `Tenant.nama_uni`, dll.)
+  tetap bekerja karena `Mapped[T]` instance attribute = `T` instance, sama dengan
+  legacy `Column[T]` runtime behavior.
+- **Performance overhead = 0** — `Mapped[T]` hanya type hint, runtime instantiation
+  sama dengan `Column[T]`.
+- **Risk utama**: kelalaian migrasi `default=` atau `server_default=` bisa mengubah
+  schema implicit. Selalu verify dengan `pytest` (166 tests mencakup model creation).
+
+### 12.9 Referensi
+
+- [`app/models/tenant.py`](../../app/models/tenant.py) — model template yang sudah dimigrasi
+- [`pyproject.toml`](../../pyproject.toml) — `[tool.mypy.overrides]` (38 modules sisanya)
+- [SQLAlchemy 2.0 Mapped[] migration guide](https://docs.sqlalchemy.org/en/20/orm/declarative_styles.html)
+- [PEP 484 — Type Hints](https://peps.python.org/pep-0484/)
