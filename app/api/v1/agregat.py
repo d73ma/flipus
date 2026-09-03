@@ -23,7 +23,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.security import decrypt_pii
-from app.core.tenant_scope import TenantScope, require_tenant_scope, resolve_tenant_scope
+from app.core.tenant_scope import TenantScope, require_tenant_scope
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
 from app.models.master import MisiKonferens, Uni, PersentaseConfig
@@ -718,47 +718,17 @@ class YtdBarOut(BaseModel):
     total_porsi_jemaat: int        # bar 6: porsi Jemaat (X + PT)
 
 
-def _tenant_ids_for_caller(db: Session, current_user: dict) -> tuple[List[int], str]:
-    """Return (tenant_ids_in_scope, scope_label) sesuai role caller.
-
-    FASE4-S5C: Sekarang menjadi thin wrapper di atas resolve_tenant_scope
-    (single source of truth). Tetap return (ids, label) tuple untuk
-    backward-compat dengan kode agregat.py yang consume (ids, label).
-    """
-    scope = resolve_tenant_scope(db, current_user)
-    if not scope.visible_tenant_ids:
-        # Caller tidak punya akses apapun — surface error biar caller tau
-        # ada misconfiguration (tenant record hilang atau role belum di-link).
-        if scope.role in ("AUDITOR_MISI",):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Caller belum terkait misi/konferens",
-            )
-        if scope.role == "ADMIN_UNI":
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Caller belum terkait uni",
-            )
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Tenant caller tidak ditemukan",
-        )
-    # Map role → scope_label untuk downstream consumer
-    label_map = {
-        "BENDAHARA": "tenant",
-        "KETUA_KEUANGAN": "tenant",
-        "PENDETA": "tenant",
-        "AUDITOR_MISI": "misi",
-        "ADMIN_UNI": "uni",
-    }
-    label = label_map.get(scope.role, "unknown")
-    return scope.visible_tenant_ids, label
+# FASE4-S6H: helper `_tenant_ids_for_caller` dihapus karena semua caller
+# (agregat.py::/sabat-ini, /ytd) sudah migrasi ke `TenantScope` (single source
+# of truth). Endpoint tinggal derive `scope_label` dari `scope.role` via map
+# inline — sama dengan pattern `chart_mingguan` (L1228).
+# Untuk role → scope_label map, lihat inline map di masing-masing endpoint.
 
 
 @router.get("/sabat-ini", tags=['Agregat'], response_model=SabatIniOut)
 def agregat_sabat_ini(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Tabel 'Persembahan sabat ini' — data HANYA untuk sabat berjalan.
@@ -779,8 +749,13 @@ def agregat_sabat_ini(
         9: "September", 10: "Oktober", 11: "November", 12: "Desember",
     }
 
-    tenant_ids, scope = _tenant_ids_for_caller(db, current_user)
-    role = current_user["role"]
+    tenant_ids = scope.visible_tenant_ids
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
+    role = scope.role
 
     # Base query: kuitansi di sabat ini
     base_q = (
@@ -838,8 +813,9 @@ def agregat_sabat_ini(
 
     # Untuk scope tenant: resolve 1× saja (1 tenant → 1 misi → 1 uni)
     tenant_pct: Optional[dict] = None
-    if scope == "tenant":
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
+    if scope_label == "tenant":
+        # FASE4-S6H: pakai scope.primary_tenant_id (sebelumnya current_user["tenant_id"]).
+        caller_tenant = db.query(Tenant).filter(Tenant.id == scope.primary_tenant_id).first()
         if caller_tenant and caller_tenant.misi_konferens_id:
             tenant_pct = _resolve_pct_for_misi(caller_tenant.misi_konferens_id)
             misi_row = db.query(MisiKonferens).filter(MisiKonferens.id == caller_tenant.misi_konferens_id).first()
@@ -850,7 +826,7 @@ def agregat_sabat_ini(
             tenant_pct = {**PCT_DEFAULTS}
         assert tenant_pct is not None  # S4-D.R1: narrow Optional[dict] for mypy
 
-    if scope == "tenant":
+    if scope_label == "tenant":
         # Bendahara/Pendeta/Ketua: tampilkan per-kuitansi dengan nama_pemberi
         rows = base_q.filter(Kuitansi.status == "finalized").order_by(Kuitansi.nomor_kuitansi.asc()).all()
         for i, r in enumerate(rows, start=1):
@@ -1044,7 +1020,7 @@ def agregat_sabat_ini(
 @router.get("/ytd", tags=['Agregat'], response_model=YtdBarOut)
 def agregat_ytd(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     6 angka kumulatif YTD (Year-To-Date) untuk grafik batang.
@@ -1068,11 +1044,16 @@ def agregat_ytd(
     sabat_ke = info["sabat_ke"]
     tanggal_sabat = info["tanggal_sabat"]
 
-    tenant_ids, scope = _tenant_ids_for_caller(db, current_user)
+    tenant_ids = scope.visible_tenant_ids
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
     if not tenant_ids:
         # No tenants in scope — return zeros
         return YtdBarOut(
-            scope=scope, tahun=tahun, sabat_ke=sabat_ke,
+            scope=scope_label, tahun=tahun, sabat_ke=sabat_ke,
             total_perpuluhan=0, total_persembahan_terpadu=0,
             total_persembahan_khusus=0, total_porsi_misi_x=0,
             total_porsi_misi_pt=0, total_porsi_jemaat=0,

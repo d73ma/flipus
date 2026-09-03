@@ -10,6 +10,7 @@ from app.core.security import decode_access_token
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.core.tenant_scope import TenantScope, require_tenant_scope
 from app.models.audit import AuditLog
 from app.models.sync import SyncOutbox
 from app.services.anonymizer import anonymize_batch, verify_hash
@@ -39,11 +40,15 @@ def get_current_user(
     return user
 
 @router.post("/upload", tags=['Sync'])
-def upload_sync(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def upload_sync(db: Session = Depends(get_db), scope: TenantScope = Depends(require_tenant_scope)):
     """Jemaat push anonymized kuitansi ke sync_outbox."""
-    if user.role not in ("BENDAHARA", "KETUA_KEUANGAN"):
+    if scope.role not in ("BENDAHARA", "KETUA_KEUANGAN"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya bendahara/ketua keuangan")
-    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    # FASE4-S6H: pakai primary_tenant_id dari TenantScope (single source of truth).
+    # Untuk BENDAHARA/KETUA_KEUANGAN, visible_tenant_ids selalu [primary_tenant_id]
+    # sehingga hasilnya identik dengan filter lama.
+    tenant_id = scope.primary_tenant_id
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
     kuitansi_list = (
@@ -65,7 +70,7 @@ def upload_sync(db: Session = Depends(get_db), user: User = Depends(get_current_
     total_porsi = sum(p["porsi_kantor_misi"] for p in payloads) if payloads else 0
     audit = AuditLog(
         tenant_id=tenant.id,
-        action="SYNC_UPLOAD_user_{}".format(user.id),
+        action="SYNC_UPLOAD_user_{}".format(scope.user_id),
         payload_hash=payloads[0]["payload_hash"] if payloads else "",
         porsi_dana_misi=total_porsi,
     )
@@ -74,11 +79,17 @@ def upload_sync(db: Session = Depends(get_db), user: User = Depends(get_current_
     return {"status": "ok", "tenant_id": tenant.id, "uploaded": inserted}
 
 @router.get("/pull", tags=['Sync'])
-def pull_sync(since: str = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def pull_sync(since: str = None, db: Session = Depends(get_db), scope: TenantScope = Depends(require_tenant_scope)):
     """Kantor Misi / Uni pull anonymized payload dari sync_outbox."""
-    if user.role not in ("AUDITOR_MISI", "ADMIN_UNI"):
+    if scope.role not in ("AUDITOR_MISI", "ADMIN_UNI"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya auditor misi / admin uni")
+    # FASE4-S6H: REAL FIX — filter via scope.visible_tenant_ids (sebelumnya
+    # kode lama pakai user.tenant_id yg utk AUDITOR_MISI hanya 1 tenant).
+    # Sekarang AUDITOR_MISI lihat SEMUA jemaat di misi caller, ADMIN_UNI lihat
+    # SEMUA jemaat via chain uni → misi → jemaat.
     q = db.query(SyncOutbox).filter(SyncOutbox.pulled_at.is_(None))
+    if scope.visible_tenant_ids:
+        q = q.filter(SyncOutbox.tenant_id.in_(scope.visible_tenant_ids))
     if since:
         try:
             since_dt = datetime.fromisoformat(since)
@@ -96,8 +107,8 @@ def pull_sync(since: str = None, db: Session = Depends(get_db), user: User = Dep
         items.append(payload)
         r.pulled_at = datetime.now(timezone.utc)
     audit = AuditLog(
-        tenant_id=user.tenant_id,
-        action="SYNC_PULL_user_{}_count_{}".format(user.id, len(items)),
+        tenant_id=scope.primary_tenant_id,
+        action="SYNC_PULL_user_{}_count_{}".format(scope.user_id, len(items)),
         payload_hash=items[0]["payload_hash"] if items else "",
         porsi_dana_misi=sum(i["porsi_kantor_misi"] for i in items),
     )
