@@ -23,6 +23,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.security import decrypt_pii
+from app.core.tenant_scope import TenantScope, require_tenant_scope, resolve_tenant_scope
 from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
 from app.models.master import MisiKonferens, Uni, PersentaseConfig
@@ -718,27 +719,40 @@ class YtdBarOut(BaseModel):
 
 
 def _tenant_ids_for_caller(db: Session, current_user: dict) -> tuple[List[int], str]:
-    """Return (tenant_ids_in_scope, scope_label) sesuai role caller."""
-    role = current_user["role"]
-    tenant_id = current_user["tenant_id"]
-    caller = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not caller:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant caller tidak ditemukan")
+    """Return (tenant_ids_in_scope, scope_label) sesuai role caller.
 
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        return [tenant_id], "tenant"
-    elif role == "AUDITOR_MISI":
-        if not caller.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait misi")
-        ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id == caller.misi_konferens_id).all()]
-        return ids, "misi"
-    elif role == "ADMIN_UNI":
-        if not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait uni")
-        ids = [t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()]
-        return ids, "uni"
-    else:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak dikenal")
+    FASE4-S5C: Sekarang menjadi thin wrapper di atas resolve_tenant_scope
+    (single source of truth). Tetap return (ids, label) tuple untuk
+    backward-compat dengan kode agregat.py yang consume (ids, label).
+    """
+    scope = resolve_tenant_scope(db, current_user)
+    if not scope.visible_tenant_ids:
+        # Caller tidak punya akses apapun — surface error biar caller tau
+        # ada misconfiguration (tenant record hilang atau role belum di-link).
+        if scope.role in ("AUDITOR_MISI",):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Caller belum terkait misi/konferens",
+            )
+        if scope.role == "ADMIN_UNI":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Caller belum terkait uni",
+            )
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Tenant caller tidak ditemukan",
+        )
+    # Map role → scope_label untuk downstream consumer
+    label_map = {
+        "BENDAHARA": "tenant",
+        "KETUA_KEUANGAN": "tenant",
+        "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi",
+        "ADMIN_UNI": "uni",
+    }
+    label = label_map.get(scope.role, "unknown")
+    return scope.visible_tenant_ids, label
 
 
 @router.get("/sabat-ini", tags=['Agregat'], response_model=SabatIniOut)
