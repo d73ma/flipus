@@ -8,24 +8,20 @@ Pattern lebih sederhana dari Kuitansi (single-step, satu pengeluaran = satu chat
 Reuse WaSession.state machine, tambah state P_*: P_IDLE, P_AWAIT_NOMINAL, P_AWAIT_PENERIMA, P_AWAIT_KATEGORI, P_CONFIRM, P_SAVED.
 """
 import json
-import re
 import logging
-import sys
-import traceback
-from datetime import datetime, timezone
-from typing import Optional
+import re
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Request, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.wa_session import WaSession
-from app.models.pengeluaran import Pengeluaran
-from app.models.kategori_pengeluaran import KategoriPengeluaran
-from app.models.user import User
-from app.models.tenant import Tenant
 from app.models.audit import AuditLog
+from app.models.kategori_pengeluaran import KategoriPengeluaran
+from app.models.pengeluaran import Pengeluaran
+from app.models.tenant import Tenant
+from app.models.user import User
+from app.models.wa_session import WaSession
 from app.services.whatsapp import send_simple_message
 
 router = APIRouter()
@@ -53,10 +49,10 @@ def _ensure_p_state(session: WaSession, expected: str):
     return True
 
 
-def _set_p_state(db: Session, session: WaSession, new_state: str, payload: Optional[dict] = None):
+def _set_p_state(db: Session, session: WaSession, new_state: str, payload: dict | None = None):
     if new_state not in P_VALID_STATES:
         raise ValueError(f"Invalid P-state: {new_state}")
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_naive = datetime.now(UTC).replace(tzinfo=None)
     session.state = new_state
     if payload is not None:
         session.payload = json.dumps(payload)
@@ -68,7 +64,7 @@ def _set_p_state(db: Session, session: WaSession, new_state: str, payload: Optio
         session.expires_at = now_naive
 
 
-def _parse_nominal(text: str) -> Optional[int]:
+def _parse_nominal(text: str) -> int | None:
     """Extract nominal dari teks. Support 250k, 1.5jt, 250000, 250,000."""
     t = text.strip().lower().replace(".", "").replace(",", "")
     t = t.replace("rp", "").replace(" ", "")
@@ -92,7 +88,7 @@ def _parse_nominal(text: str) -> Optional[int]:
         return None
 
 
-def _detect_sender_tenant(db: Session, phone: str) -> Optional[Tenant]:
+def _detect_sender_tenant(db: Session, phone: str) -> Tenant | None:
     """Find tenant based on sender phone. Match ke nomor_whatsapp Bendahara tenant.
 
     Coba beberapa format: 62xxx, 08xxx, +62xxx.
@@ -110,7 +106,7 @@ def _detect_sender_tenant(db: Session, phone: str) -> Optional[Tenant]:
     user = db.query(User).filter(
         User.nomor_whatsapp.in_(candidates),
         User.role == "BENDAHARA",
-        User.is_active == True,
+        User.is_active == True,  # noqa: E712)
     ).first()
     if user:
         return db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
@@ -128,7 +124,7 @@ def _gen_nomor_pengeluaran_inline(db: Session, tenant_id: int, tanggal: str) -> 
     return f"{prefix}{seq:03d}"
 
 
-@router.post("/wa/pengeluaran/inbound")
+@router.post("/wa/pengeluaran/inbound", tags=['Pengeluaran'])
 async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)):
     """Webhook Fonnte untuk chat Bendahara terkait Pengeluaran."""
     body = await request.json()
@@ -150,7 +146,7 @@ async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)
     session = db.query(WaSession).filter(WaSession.phone == phone).first()
     if session is None:
         session = WaSession(phone=phone, state="P_IDLE", payload=None,
-                            updated_at=datetime.now(timezone.utc).replace(tzinfo=None))
+                            updated_at=datetime.now(UTC).replace(tzinfo=None))
         db.add(session)
         db.flush()
     elif session.state.startswith("P_") is False:
@@ -216,7 +212,7 @@ async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)
         # List kategori aktif tenant
         kats = db.query(KategoriPengeluaran).filter(
             KategoriPengeluaran.tenant_id == tenant.id,
-            KategoriPengeluaran.is_aktif == True,
+            KategoriPengeluaran.is_aktif == True,  # noqa: E712)
         ).order_by(KategoriPengeluaran.urutan).all()
         # Format pilihan
         kat_list = "\n".join([f"  {i+1}. {k.nama} ({k.alias}){'(rutin)' if k.is_rutin else ''}" for i, k in enumerate(kats)])
@@ -235,10 +231,10 @@ async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)
         # Match by alias, nama, atau nomor urut
         kats = db.query(KategoriPengeluaran).filter(
             KategoriPengeluaran.tenant_id == tenant.id,
-            KategoriPengeluaran.is_aktif == True,
+            KategoriPengeluaran.is_aktif == True,  # noqa: E712)
         ).order_by(KategoriPengeluaran.urutan).all()
 
-        chosen: Optional[KategoriPengeluaran] = None
+        chosen: KategoriPengeluaran | None = None
         # Try numeric index
         if msg_low.isdigit():
             idx = int(msg_low) - 1
@@ -312,16 +308,16 @@ async def wa_pengeluaran_inbound(request: Request, db: Session = Depends(get_db)
         if is_rutin:
             p.status = 'approved'
             # Lookup Bendahara user
-            user = db.query(User).filter(User.tenant_id == tenant.id, User.role == "BENDAHARA", User.is_active == True).first()
+            user = db.query(User).filter(User.tenant_id == tenant.id, User.role == "BENDAHARA", User.is_active == True)  # noqa: E712.  .first()
             if user:
                 p.created_by_user_id = user.id
                 p.approved_ketua_by_user_id = user.id  # auto-stub (rutin skip approval)
                 p.approved_pendeta_by_user_id = user.id
-                p.approved_ketua_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                p.approved_ketua_at = datetime.now(UTC).replace(tzinfo=None)
                 p.approved_pendeta_at = p.approved_ketua_at
         else:
             p.status = 'pending_approval'
-            user = db.query(User).filter(User.tenant_id == tenant.id, User.role == "BENDAHARA", User.is_active == True).first()
+            user = db.query(User).filter(User.tenant_id == tenant.id, User.role == "BENDAHARA", User.is_active == True)  # noqa: E712.  .first()
             if user:
                 p.created_by_user_id = user.id
 
@@ -356,11 +352,10 @@ def _send_reply(phone: str, message: str):
     try:
         send_simple_message(phone, message)
     except Exception as exc:
-        err = f"[WA-PENG-REPLY] failed: {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-        print(err, file=sys.stderr)
+        log.exception("wa_peng_reply_failed", extra={"phone": phone, "to_log_message": str(exc)[:200]})
 
 
-@router.post("/wa/pengeluaran/reset")
+@router.post("/wa/pengeluaran/reset", tags=['Pengeluaran'])
 def reset_session(request: Request, db: Session = Depends(get_db)):
     """Admin endpoint untuk reset WaSession P_*. Body: {phone: ...}."""
     body = __import__("asyncio").run(request.json())

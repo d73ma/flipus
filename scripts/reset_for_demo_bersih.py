@@ -22,9 +22,9 @@ Akan menulis log ke stdout. Aman diulang (idempotent untuk tenants & pct config)
 from __future__ import annotations
 
 import os
-import sys
 import random
-from datetime import date, timedelta
+import sys
+from datetime import date
 
 # Path setup
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,17 +32,17 @@ _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)
 
-from sqlalchemy import delete
-from app.core.database import SessionLocal, engine, Base
-from app.core.security import generate_tenant_signature, encrypt_pii, hash_password
-from app.core.config import settings
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-from app.models.tenant import Tenant
-from app.models.user import User
-from app.models.transaction import Kuitansi  # RekapMingguan = String column on Kuitansi, no separate model
-from app.models.audit import AuditLog
-from app.utils.porsi_calculator import compute_porsi
+from sqlalchemy import delete  # noqa: E402
 
+from app.core.database import Base, SessionLocal, engine  # noqa: E402
+from app.core.security import encrypt_pii, generate_tenant_signature, hash_password  # noqa: E402
+from app.models.master import MisiKonferens, PersentaseConfig  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
+from app.models.transaction import (
+    Kuitansi,  # RekapMingguan = String column on Kuitansi, no separate model  # noqa: E402
+)
+from app.models.user import User  # noqa: E402
+from app.utils.porsi_calculator import compute_porsi  # noqa: E402
 
 # === Konfigurasi simulasi ===
 JEMAAT_BARU = [

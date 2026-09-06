@@ -16,13 +16,11 @@ import base64
 import io
 import secrets
 import string
-from typing import List, Tuple
 
 import pyotp
 import qrcode
 
-from app.core.security import encrypt_pii, decrypt_pii, hash_password
-
+from app.core.security import decrypt_pii, encrypt_pii, hash_password
 
 # ===== Constants =====
 ISSUER_NAME = "FLIPUS GMAHK UKIKT"
@@ -92,7 +90,7 @@ def verify_totp(secret: str, code: str, valid_window: int = TOTP_VALID_WINDOW) -
 
 # ===== Backup Codes =====
 
-def generate_backup_codes(count: int = BACKUP_CODE_COUNT, length: int = BACKUP_CODE_LENGTH) -> List[str]:
+def generate_backup_codes(count: int = BACKUP_CODE_COUNT, length: int = BACKUP_CODE_LENGTH) -> list[str]:
     """Generate single-use backup codes (readable format).
 
     Format: ABC12-DEF34 (uppercase + digits, dash in middle)
@@ -107,12 +105,12 @@ def generate_backup_codes(count: int = BACKUP_CODE_COUNT, length: int = BACKUP_C
     return codes
 
 
-def hash_backup_codes(codes: List[str]) -> List[str]:
+def hash_backup_codes(codes: list[str]) -> list[str]:
     """Hash each backup code with bcrypt for secure storage."""
     return [hash_password(code) for code in codes]
 
 
-def verify_backup_code(code: str, hashed_list: List[str]) -> Tuple[bool, int]:
+def verify_backup_code(code: str, hashed_list: list[str]) -> tuple[bool, int]:
     """Verify a backup code against the hashed list.
 
     Returns:

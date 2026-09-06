@@ -15,26 +15,26 @@ Void rule:
 - Hanya boleh void kalau status belum final (finalized Kuitansi / approved Pengeluaran)
 - Kalau sudah final → 403 dengan pesan "butuh approval Auditor"
 """
+import logging
 import secrets
 import string
-import sys
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.security import hash_password
-from app.models.user import User
-from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni
-from app.models.transaction import Kuitansi
-from app.models.pengeluaran import Pengeluaran
 from app.models.audit import AuditLog
-from app.services.whatsapp import send_simple_message
+from app.models.master import MisiKonferens, Uni
+from app.models.pengeluaran import Pengeluaran
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.models.user import User
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -47,9 +47,9 @@ class InviteUserIn(BaseModel):
     nomor_whatsapp: str
     # Opsional: kalau role=BENDAHARA/KETUA_KEUANGAN/PENDETA, assign ke jemaat tertentu (default tenant caller).
     # Kalau role=AUDITOR_MISI, assign ke misi tertentu (default misi caller).
-    target_jemaat_id: Optional[int] = None
-    target_misi_id: Optional[int] = None
-    username_hint: Optional[str] = None  # kalau dikasih, dipakai sebagai base username
+    target_jemaat_id: int | None = None
+    target_misi_id: int | None = None
+    username_hint: str | None = None  # kalau dikasih, dipakai sebagai base username
 
 
 class InviteUserOut(BaseModel):
@@ -63,7 +63,7 @@ class InviteUserOut(BaseModel):
     tenant_id: int
     nomor_whatsapp: str
     wa_sent: bool
-    wa_response: Optional[str] = None  # JSON-string, biar Pydantic tidak revalidate isi dict
+    wa_response: str | None = None  # JSON-string, biar Pydantic tidak revalidate isi dict
 
 
 class VoidOut(BaseModel):
@@ -73,12 +73,12 @@ class VoidOut(BaseModel):
     nomor: str
     voided_by_user_id: int
     voided_at: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 # ===== Helpers =====
 
-def _generate_username(role: str, hint: Optional[str], db: Session, tenant_id: int) -> str:
+def _generate_username(role: str, hint: str | None, db: Session, tenant_id: int) -> str:
     """Generate unique username. Format: <role>_<hint|random3>. Suffix _a/_b jika bentrok."""
     role_prefix = role.lower().replace("_keuangan", "")
     base = (hint or "").strip().lower()[:12].replace(" ", "_") or role_prefix
@@ -107,7 +107,7 @@ def _generate_temp_password() -> str:
 
 def _resolve_target_tenant(
     caller: dict, db: Session, role: str,
-    target_jemaat_id: Optional[int], target_misi_id: Optional[int],
+    target_jemaat_id: int | None, target_misi_id: int | None,
 ) -> Tenant:
     """Resolve target Tenant untuk user baru berdasarkan role dan scope caller.
 
@@ -177,7 +177,7 @@ def _resolve_target_tenant(
 
 # ===== Endpoint 1: POST /users/invite =====
 
-@router.post("/users/invite")  # response_model=InviteUserOut sengaja dihapus — biar return raw dict
+@router.post("/users/invite", tags=['Managed'])  # response_model=InviteUserOut sengaja dihapus — biar return raw dict
 def invite_user(
     payload: InviteUserIn,
     db: Session = Depends(get_db),
@@ -231,11 +231,10 @@ def invite_user(
     # Encrypt WA (v1.5-E pattern) — fallback ke None kalau encrypt_pii tidak ready
     wa_encrypted = None
     try:
-        from app.core.security import encrypt_pii, fernet
-        if fernet is not None:
-            wa_encrypted = encrypt_pii(wa)
+        from app.core.security import encrypt_pii
+        wa_encrypted = encrypt_pii(wa)
     except Exception as exc:  # noqa: BLE001
-        print(f"[M8 invite] encrypt_pii skipped: {exc}", file=sys.stderr, flush=True)
+        logger.exception(f"[M8 invite] encrypt_pii skipped: {exc}")
         wa_encrypted = None
 
     # Create user
@@ -264,7 +263,7 @@ def invite_user(
         db.refresh(new_user)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(500, f"Gagal create user: {exc}")
+        raise HTTPException(500, f"Gagal create user: {exc}") from exc
 
     # Kirim WA — wrap semua, kalau gagal return success + warning supaya caller tidak bingung
     role_label = {
@@ -297,7 +296,7 @@ def invite_user(
         if isinstance(wa_resp_dict.get("status"), bool):
             wa_sent = wa_resp_dict.get("status") is True
     except Exception as exc:
-        print(f"[M8 invite] WA send error: {exc}", file=sys.stderr, flush=True)
+        logger.exception(f"[M8 invite] WA send error: {exc}")
         wa_resp_dict = {"error": str(exc)[:200]}
 
     # Serialize dict ke JSON string — response_model=InviteUserOut pakai Optional[str]
@@ -320,10 +319,10 @@ def invite_user(
 
 # ===== Endpoint 2: POST /kuitansi/{kuitansi_id}/void =====
 
-@router.post("/kuitansi/{kuitansi_id}/void", response_model=VoidOut)
+@router.post("/kuitansi/{kuitansi_id}/void", tags=['Managed'], response_model=VoidOut)
 def void_kuitansi(
     kuitansi_id: int,
-    reason: Optional[str] = None,  # query param ?reason=...
+    reason: str | None = None,  # query param ?reason=...
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -387,10 +386,10 @@ def void_kuitansi(
 
 # ===== Endpoint 3: POST /pengeluaran/{pengeluaran_id}/void =====
 
-@router.post("/pengeluaran/{pengeluaran_id}/void", response_model=VoidOut)
+@router.post("/pengeluaran/{pengeluaran_id}/void", tags=['Managed'], response_model=VoidOut)
 def void_pengeluaran(
     pengeluaran_id: int,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):

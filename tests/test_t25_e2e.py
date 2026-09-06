@@ -7,7 +7,6 @@ Run:
     .venv/bin/python3 -m pytest tests/test_t25_e2e.py -v
 """
 
-import pytest
 import pyotp
 
 
@@ -281,7 +280,7 @@ class TestE2EPrivacyMatrix:
         bendahara_a, ketua_a
     ):
         """Notifications are strictly user-scoped — never leak across users."""
-        from app.services.notification_service import create_notification, EventType
+        from app.services.notification_service import EventType, create_notification
         # Create notifications for different users
         db = test_db()
         create_notification(

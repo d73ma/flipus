@@ -14,18 +14,16 @@ Test:
 Run: pytest tests/test_branding.py -v
 """
 
-import pytest
 import io
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 from app.services.branding_service import (
+    MAX_LOGO_SIZE_BYTES,
     _validate_hex_color,
     _validate_logo_file,
-    ALLOWED_LOGO_EXTENSIONS,
-    MAX_LOGO_SIZE_BYTES,
 )
-
 
 # ===== Hex Color Validation =====
 
@@ -98,8 +96,8 @@ class TestBrandingUpdate:
     def test_admin_can_update_branding(self, client, test_db):
         """Admin uni can update tenant's branding."""
         # Setup: AdminUni + tenant
+        from app.core.security import generate_tenant_signature, hash_password
         from app.models.master import Uni
-        from app.core.security import hash_password, generate_tenant_signature
         from app.models.tenant import Tenant
         from app.models.user import User
 
@@ -163,8 +161,8 @@ class TestBrandingUpdate:
 
     def test_invalid_color_rejected(self, client, test_db):
         """Invalid hex color -> 400."""
+        from app.core.security import generate_tenant_signature, hash_password
         from app.models.master import Uni
-        from app.core.security import hash_password, generate_tenant_signature
         from app.models.tenant import Tenant
         from app.models.user import User
 
@@ -211,7 +209,7 @@ class TestBrandingUpdate:
 
     def test_non_admin_cannot_update_branding(self, client, test_db):
         """Non-admin can't update branding."""
-        from app.core.security import hash_password, generate_tenant_signature
+        from app.core.security import generate_tenant_signature, hash_password
         from app.models.tenant import Tenant
         from app.models.user import User
 
@@ -255,8 +253,8 @@ class TestLogoUpload:
 
     def test_admin_can_upload_logo(self, client, test_db, tmp_path):
         """Admin uploads a PNG logo."""
+        from app.core.security import generate_tenant_signature, hash_password
         from app.models.master import Uni
-        from app.core.security import hash_password, generate_tenant_signature
         from app.models.tenant import Tenant
         from app.models.user import User
 
@@ -315,8 +313,8 @@ class TestLogoUpload:
 
     def test_too_big_rejected(self, client, test_db):
         """File > 1MB rejected."""
+        from app.core.security import generate_tenant_signature, hash_password
         from app.models.master import Uni
-        from app.core.security import hash_password, generate_tenant_signature
         from app.models.tenant import Tenant
         from app.models.user import User
 

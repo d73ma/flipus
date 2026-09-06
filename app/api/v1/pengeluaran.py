@@ -20,18 +20,21 @@ Approval chain (Jerry 2026-09-01):
 """
 import re
 from datetime import datetime
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import desc
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_, or_, func as sqlfunc
 
+from app.api.v1.auth import require_roles
 from app.core.database import get_db
-from app.api.v1.auth import get_current_user, require_roles
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.kategori_pengeluaran import KategoriPengeluaran
 from app.models.pengeluaran import Pengeluaran
-
 
 router = APIRouter()
 
@@ -61,20 +64,20 @@ class PengeluaranOut(BaseModel):
     tanggal: str
     tanggal_sabat: str
     kategori_pengeluaran_id: int
-    kategori_nama: Optional[str] = None
-    kategori_alias: Optional[str] = None
+    kategori_nama: str | None = None
+    kategori_alias: str | None = None
     jumlah: int
-    deskripsi: Optional[str] = None
-    penerima: Optional[str] = None
-    metode_bayar: Optional[str] = None
+    deskripsi: str | None = None
+    penerima: str | None = None
+    metode_bayar: str | None = None
     status: str
-    created_via: Optional[str] = None
-    created_by_user_id: Optional[int] = None
+    created_via: str | None = None
+    created_by_user_id: int | None = None
     created_at: str
-    approved_ketua_at: Optional[str] = None
-    approved_pendeta_at: Optional[str] = None
-    rejected_at: Optional[str] = None
-    rejected_reason: Optional[str] = None
+    approved_ketua_at: str | None = None
+    approved_pendeta_at: str | None = None
+    rejected_at: str | None = None
+    rejected_reason: str | None = None
 
     class Config:
         from_attributes = True
@@ -84,22 +87,22 @@ class PengeluaranCreate(BaseModel):
     tanggal: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     kategori_pengeluaran_id: int
     jumlah: int = Field(..., gt=0)
-    deskripsi: Optional[str] = Field(None, max_length=500)
-    penerima: Optional[str] = Field(None, max_length=200)
-    metode_bayar: Optional[str] = Field(None, max_length=20)
+    deskripsi: str | None = Field(None, max_length=500)
+    penerima: str | None = Field(None, max_length=200)
+    metode_bayar: str | None = Field(None, max_length=20)
 
 
 class PengeluaranUpdate(BaseModel):
-    tanggal: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
-    kategori_pengeluaran_id: Optional[int] = None
-    jumlah: Optional[int] = Field(None, gt=0)
-    deskripsi: Optional[str] = Field(None, max_length=500)
-    penerima: Optional[str] = Field(None, max_length=200)
-    metode_bayar: Optional[str] = Field(None, max_length=20)
+    tanggal: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    kategori_pengeluaran_id: int | None = None
+    jumlah: int | None = Field(None, gt=0)
+    deskripsi: str | None = Field(None, max_length=500)
+    penerima: str | None = Field(None, max_length=200)
+    metode_bayar: str | None = Field(None, max_length=20)
 
 
 class PengeluaranAction(BaseModel):
-    note: Optional[str] = Field(None, max_length=255)
+    note: str | None = Field(None, max_length=255)
 
 
 class PengeluaranReject(BaseModel):
@@ -114,7 +117,7 @@ class RekapBulananOut(BaseModel):
     count_rutin: int
     count_non_rutin: int
     count_pending: int
-    by_kategori: List[dict]  # [{kategori_id, kategori_nama, total, count}]
+    by_kategori: list[dict]  # [{kategori_id, kategori_nama, total, count}]
 
 
 # ========== Helpers ==========
@@ -154,7 +157,7 @@ def _kategori_to_dict(k: KategoriPengeluaran) -> dict:
     return {"id": k.id, "nama": k.nama, "alias": k.alias, "is_rutin": k.is_rutin, "urutan": k.urutan}
 
 
-def _pengeluaran_to_dict(p: Pengeluaran, kategori: Optional[KategoriPengeluaran]) -> dict:
+def _pengeluaran_to_dict(p: Pengeluaran, kategori: KategoriPengeluaran | None) -> dict:
     return {
         "id": p.id,
         "nomor_pengeluaran": p.nomor_pengeluaran,
@@ -180,19 +183,19 @@ def _pengeluaran_to_dict(p: Pengeluaran, kategori: Optional[KategoriPengeluaran]
 
 # ========== KategoriPengeluaran endpoints ==========
 
-@router.get("/kategori-pengeluaran/list", response_model=List[KategoriPengeluaranOut])
+@router.get("/kategori-pengeluaran/list", tags=['Pengeluaran'], response_model=list[KategoriPengeluaranOut])
 def list_kategori_pengeluaran(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — List kategori pengeluaran aktif untuk tenant user."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    """v2.0 M5 — List kategori pengeluaran aktif untuk tenant user.
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     rows = (
         db.query(KategoriPengeluaran)
-        .filter(KategoriPengeluaran.tenant_id == tenant_id)
-        .filter(KategoriPengeluaran.is_aktif == True)
+        .filter(KategoriPengeluaran.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(KategoriPengeluaran.is_aktif == True)  # noqa: E712
         .order_by(
             KategoriPengeluaran.is_rutin.desc(),
             KategoriPengeluaran.urutan.asc(),
@@ -204,7 +207,7 @@ def list_kategori_pengeluaran(
     return [KategoriPengeluaranOut.model_validate(_kategori_to_dict(r)) for r in rows]
 
 
-@router.post("/kategori-pengeluaran/create", response_model=KategoriPengeluaranOut, status_code=201)
+@router.post("/kategori-pengeluaran/create", tags=['Pengeluaran'], response_model=KategoriPengeluaranOut, status_code=201)
 def create_kategori_pengeluaran(
     payload: KategoriPengeluaranCreate,
     db: Session = Depends(get_db),
@@ -250,19 +253,19 @@ def create_kategori_pengeluaran(
 
 # ========== Pengeluaran endpoints ==========
 
-@router.get("/pengeluaran/list", response_model=List[PengeluaranOut])
+@router.get("/pengeluaran/list", tags=['Pengeluaran'], response_model=list[PengeluaranOut])
 def list_pengeluaran(
-    status_filter: Optional[str] = None,
-    bulan: Optional[str] = None,  # YYYY-MM
+    status_filter: str | None = None,
+    bulan: str | None = None,  # YYYY-MM
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — List pengeluaran (filter tenant + optional status + optional bulan)."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
-    q = db.query(Pengeluaran).filter(Pengeluaran.tenant_id == tenant_id)
+    """v2.0 M5 — List pengeluaran (filter tenant + optional status + optional bulan).
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
+    q = db.query(Pengeluaran).filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
     if status_filter:
         q = q.filter(Pengeluaran.status == status_filter)
     if bulan:
@@ -279,7 +282,7 @@ def list_pengeluaran(
     return [PengeluaranOut.model_validate(_pengeluaran_to_dict(r, kat_map.get(r.kategori_pengeluaran_id))) for r in rows]
 
 
-@router.post("/pengeluaran/create", response_model=PengeluaranOut, status_code=201)
+@router.post("/pengeluaran/create", tags=['Pengeluaran'], response_model=PengeluaranOut, status_code=201)
 def create_pengeluaran(
     payload: PengeluaranCreate,
     db: Session = Depends(get_db),
@@ -296,7 +299,7 @@ def create_pengeluaran(
         db.query(KategoriPengeluaran)
         .filter(KategoriPengeluaran.tenant_id == tenant_id)
         .filter(KategoriPengeluaran.id == payload.kategori_pengeluaran_id)
-        .filter(KategoriPengeluaran.is_aktif == True)
+        .filter(KategoriPengeluaran.is_aktif == True)  # noqa: E712
         .first()
     )
     if not kat:
@@ -326,7 +329,7 @@ def create_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.put("/pengeluaran/{pengeluaran_id}/update", response_model=PengeluaranOut)
+@router.put("/pengeluaran/{pengeluaran_id}/update", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def update_pengeluaran(
     pengeluaran_id: int,
     payload: PengeluaranUpdate,
@@ -356,7 +359,7 @@ def update_pengeluaran(
             db.query(KategoriPengeluaran)
             .filter(KategoriPengeluaran.tenant_id == tenant_id)
             .filter(KategoriPengeluaran.id == payload.kategori_pengeluaran_id)
-            .filter(KategoriPengeluaran.is_aktif == True)
+            .filter(KategoriPengeluaran.is_aktif == True)  # noqa: E712
             .first()
         )
         if not kat:
@@ -378,7 +381,7 @@ def update_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/submit", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/submit", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def submit_pengeluaran(
     pengeluaran_id: int,
     db: Session = Depends(get_db),
@@ -421,7 +424,7 @@ def submit_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/approve-ketua", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/approve-ketua", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def approve_ketua(
     pengeluaran_id: int,
     payload: PengeluaranAction = PengeluaranAction(),
@@ -453,7 +456,7 @@ def approve_ketua(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/approve-pendeta", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/approve-pendeta", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def approve_pendeta(
     pengeluaran_id: int,
     payload: PengeluaranAction = PengeluaranAction(),
@@ -485,7 +488,7 @@ def approve_pendeta(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.post("/pengeluaran/{pengeluaran_id}/reject", response_model=PengeluaranOut)
+@router.post("/pengeluaran/{pengeluaran_id}/reject", tags=['Pengeluaran'], response_model=PengeluaranOut)
 def reject_pengeluaran(
     pengeluaran_id: int,
     payload: PengeluaranReject,
@@ -517,40 +520,40 @@ def reject_pengeluaran(
     return PengeluaranOut.model_validate(_pengeluaran_to_dict(p, kat))
 
 
-@router.get("/pengeluaran/pending-count")
+@router.get("/pengeluaran/pending-count", tags=['Pengeluaran'])
 def pending_count(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — Count pending approval untuk badge Ketua/Pendeta dashboard."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        return {"pending_ketua": 0, "pending_pendeta": 0}
+    """v2.0 M5 — Count pending approval untuk badge Ketua/Pendeta dashboard.
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     pending_ketua = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.status == 'pending_approval')
         .scalar()
     )
     pending_pendeta = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.status == 'approved_ketua')
         .scalar()
     )
     return {"pending_ketua": pending_ketua or 0, "pending_pendeta": pending_pendeta or 0}
 
 
-@router.get("/pengeluaran/rekap", response_model=RekapBulananOut)
+@router.get("/pengeluaran/rekap", tags=['Pengeluaran'], response_model=RekapBulananOut)
 def rekap_bulanan(
     bulan: str,  # YYYY-MM
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """v2.0 M5 — Rekap bulanan per tenant (untuk dashboard widget)."""
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    """v2.0 M5 — Rekap bulanan per tenant (untuk dashboard widget).
+
+    FASE4-S6D: pakai TenantScope (gantikan inline tenant_id = current_user).
+    """
     if not re.match(r"^\d{4}-\d{2}$", bulan):
         raise HTTPException(400, "Format bulan harus YYYY-MM")
 
@@ -561,9 +564,9 @@ def rekap_bulanan(
             sqlfunc.sum(Pengeluaran.jumlah).label("total"),
             sqlfunc.count(Pengeluaran.id).label("cnt"),
         )
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.tanggal.like(f"{bulan}%"))
-        .filter(Pengeluaran.status == 'approved')
+        .filter(Pengeluaran.status == "approved")
         .group_by(Pengeluaran.kategori_pengeluaran_id)
         .all()
     )
@@ -602,7 +605,7 @@ def rekap_bulanan(
     # Pending count (any status not approved yet)
     count_pending = (
         db.query(sqlfunc.count(Pengeluaran.id))
-        .filter(Pengeluaran.tenant_id == tenant_id)
+        .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Pengeluaran.tanggal.like(f"{bulan}%"))
         .filter(Pengeluaran.status.in_(['pending_approval', 'approved_ketua']))
         .scalar()

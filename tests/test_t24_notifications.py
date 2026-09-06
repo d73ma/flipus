@@ -8,16 +8,16 @@ Run:
     .venv/bin/python3 -m pytest tests/test_t24_notifications.py -v
 """
 
-import pytest
-from datetime import datetime, timedelta
+from datetime import timedelta
+
 from app.core.security import utcnow
+from app.models.notification import Notification
 from app.services.notification_service import (
+    EventType,
+    cleanup_old_notifications,
     create_notification,
     create_notifications_bulk,
-    cleanup_old_notifications,
-    EventType,
 )
-from app.models.notification import Notification
 
 
 class TestNotificationCreation:

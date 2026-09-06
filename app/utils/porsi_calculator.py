@@ -37,7 +37,6 @@ Contoh Jerry (2026-08-23, slide demo):
   constraint penjumlahan tetap ≤ 1.0 untuk hasil yang konsisten.
 """
 
-from typing import Tuple
 
 
 def compute_porsi(

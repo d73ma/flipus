@@ -8,7 +8,8 @@ Tabel:
   dan per Uni (Misi→Uni). Diset oleh Auditor / Admin Uni.
 """
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Float, DateTime, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, func
+
 from app.core.database import Base
 
 

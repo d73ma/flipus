@@ -1,13 +1,26 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     SECRET_KEY: str
     SECRET_KEY_PREVIOUS: str = ""  # Optional: dual-key rotation grace window
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
+    # FASE 3-S3.S8 — diperpendek dari 8 jam (480) ke 15 menit, dikompensasi
+    # dengan refresh token 7 hari. Best practice OWASP JWT cheat sheet:
+    # access token < 30 min, refresh token > 1 hari, refresh stored server-side.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PII_ENCRYPTION_KEY: str
+    # FASE 3-S2.T3 — dual-key rotation window untuk PII Fernet.
+    # Saat rotasi:
+    #   1. Set PII_ENCRYPTION_KEY = new_key (encrypt pakai new_key)
+    #   2. Set PII_ENCRYPTION_KEY_PREVIOUS = old_key (decrypt fallback)
+    #   3. Jalankan maintenance script `rotate_pii_to_new_key.py` untuk
+    #      re-encrypt semua ciphertext existing ke new_key
+    #   4. Kosongkan PII_ENCRYPTION_KEY_PREVIOUS setelah selesai.
+    PII_ENCRYPTION_KEY_PREVIOUS: str = ""
     LICENSE_TENANT_SIGNATURE_SALT: str = "UKIKT_FLIPUS_2026_NATAAN_RATAHAN_SALT"
 
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -39,6 +52,12 @@ class Settings(BaseSettings):
     # LAN origins (192.168.x.x, 10.x.x.x, 172.16-31.x.x) auto-allowed via regex di main.py
     # untuk demo offline multi-device di Wi-Fi lokal.
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+
+    # ===== FASE 3-S3.S1 — Logging =====
+    # Log level untuk root logger. Valid: DEBUG, INFO, WARNING, ERROR.
+    # Default INFO untuk production. Set DEBUG via env LOG_LEVEL=DEBUG untuk
+    # verbose development. JSONFormatter handles structure (see app/core/logger.py).
+    LOG_LEVEL: str = "INFO"
 
     # ===== Admin endpoints (v1.5) =====
     # Shared secret untuk endpoint kritis (POST /seed, /register-tenant, /restore-db).

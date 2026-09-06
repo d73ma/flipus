@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, BigInteger, Boolean, Index, func
-from sqlalchemy.orm import relationship
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, func
+
 from app.core.database import Base
+
 
 class Kuitansi(Base):
     __tablename__ = "kuitansi"
@@ -43,6 +44,19 @@ class Kuitansi(Base):
     porsi_kas_jemaat = Column(BigInteger, default=0)
     porsi_khusus_misi = Column(BigInteger, default=0)  # Porsi Khusus yg ke Misi
     porsi_khusus_jemaat = Column(BigInteger, default=0)  # Porsi Khusus yg ke Jemaat
+
+    # FASE 2 S5/R4: porsi Uni (potongan langsung dari TOTAL, Jerry Model B pct_uni).
+    # Sebelumnya tidak disimpan — harus dihitung ulang setiap kali dibutuhkan.
+    # Sekarang disimpan untuk auditability (Uni bisa verify share-nya dari data historis).
+    porsi_x_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+    porsi_pt_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+    porsi_khusus_uni = Column(BigInteger, default=0, server_default="0", nullable=False)
+
+    # FASE 2 S6/R5: tracking kapan porsi terakhir di-recompute (single atau batch).
+    # NULL = belum pernah di-recompute (compute awal saat create kuitansi via dashboard.py).
+    # Berguna untuk audit: "kapan porsi ini berubah dari nilai awalnya?"
+    # Jangan bingung dengan created_at — created_at = waktu input, porsi_recomputed_at = waktu hitung ulang.
+    porsi_recomputed_at = Column(DateTime, nullable=True, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
 

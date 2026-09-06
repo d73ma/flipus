@@ -3,10 +3,12 @@ Retention Daemon — Hapus data PII di bulan ke-31.
 Yang dipertahankan: ledger angka (jurnal umum).
 Yang dihapus: nama, nomor WA, file foto amplop.
 """
-import os
 import logging
-from datetime import datetime, timedelta
+import os
+from datetime import timedelta
+
 from sqlalchemy.orm import Session
+
 from app.core.security import utcnow
 from app.models.transaction import Kuitansi
 

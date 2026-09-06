@@ -21,8 +21,8 @@ Cara pakai:
 Idempotent — kalau sudah ada kuitansi untuk sabat tsb, skip (tidak duplicate).
 """
 import os
-import sys
 import random
+import sys
 from datetime import datetime, timedelta
 
 # Pastikan root project ada di sys.path
@@ -30,15 +30,15 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from app.core.database import SessionLocal, engine, Base
-from app.models.tenant import Tenant
-from app.models.user import User
-from app.models.transaction import Kuitansi
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-from app.core.security import encrypt_pii
-from app.utils.nomor_kuitansi import generate_nomor_kuitansi, generate_id_rekap_mingguan
-from app.services.financial_calculator import calculate_distribution
-from app.utils.number_to_words import terbilang
+from app.core.database import Base, SessionLocal, engine  # noqa: E402
+from app.core.security import encrypt_pii  # noqa: E402
+from app.models.master import PersentaseConfig  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
+from app.models.transaction import Kuitansi  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.services.financial_calculator import calculate_distribution  # noqa: E402
+from app.utils.nomor_kuitansi import generate_id_rekap_mingguan, generate_nomor_kuitansi  # noqa: E402
+from app.utils.number_to_words import terbilang  # noqa: E402
 
 # Buat semua tabel kalau belum ada (idempotent)
 Base.metadata.create_all(bind=engine)
@@ -171,7 +171,7 @@ def seed_kuitansi_realistis():
 
             # Get Misi & PersentaseConfig
             if not tenant.misi_konferens_id:
-                print(f"  ⚠ Tenant belum terkait misi, skip")
+                print("  ⚠ Tenant belum terkait misi, skip")
                 continue
             cfg = (
                 db.query(PersentaseConfig)

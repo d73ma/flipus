@@ -11,41 +11,55 @@ Endpoint manual untuk testing / recovery:
                                 ubah persentase dan ingin apply ke data lama juga.
 """
 
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+
+# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.audit import AuditLog
-from app.models.master import PersentaseConfig, MisiKonferens
+from app.models.master import PersentaseConfig
 from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
 from app.models.user import User
 from app.services import backup_service
-from app.services.financial_calculator import calculate_distribution
-from app.services.notification_service import create_notification, EventType
+from app.services.notification_service import EventType, create_notification
 from app.services.whatsapp import get_device_status
 
+# FASE 2 S4/R3: migrasi dari legacy calculate_distribution (Layer 1+2) ke Jerry Model B (compute_porsi).
+# Single source of truth: semua call site yang recompute porsi harus pakai compute_porsi.
+from app.utils.porsi_calculator import compute_porsi
+
 router = APIRouter()
+
+
+def _now() -> datetime:
+    """FASE 2 S6/R5: helper UTC timestamp untuk porsi_recomputed_at & audit logs."""
+    return datetime.now(UTC)
 
 
 # ===== Fonnte Device Status (v1.5-F) =====
 
 class FonnteDeviceStatusOut(BaseModel):
     status: str  # 'connected' | 'disconnected' | 'disabled' | 'no_token' | 'error'
-    device: Optional[str] = None
-    phone: Optional[str] = None
-    quota: Optional[int] = None
-    quota_remaining: Optional[int] = None
-    expired: Optional[str] = None
-    reason: Optional[str] = None
+    device: str | None = None
+    phone: str | None = None
+    quota: int | None = None
+    quota_remaining: int | None = None
+    expired: str | None = None
+    reason: str | None = None
     checked_at: str
 
 
-@router.get("/fonnte/device-status", response_model=FonnteDeviceStatusOut)
+@router.get("/fonnte/device-status", tags=['Admin'], response_model=FonnteDeviceStatusOut)
 def get_fonnte_device_status(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -61,8 +75,8 @@ def get_fonnte_device_status(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni yang boleh cek device Fonnte")
 
     info = get_device_status()
-    from datetime import datetime, timezone
-    info["checked_at"] = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    info["checked_at"] = datetime.now(UTC).isoformat()
     return info
 
 
@@ -74,7 +88,7 @@ class ManualResetOut(BaseModel):
     note: str
 
 
-@router.post("/trigger-reset", response_model=ManualResetOut)
+@router.post("/trigger-reset", tags=['Admin'], response_model=ManualResetOut)
 def trigger_manual_reset(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -94,7 +108,7 @@ def trigger_manual_reset(
     try:
         trigger_reset_now()
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reset gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Reset gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -118,11 +132,11 @@ class BackupOut(BaseModel):
     filename: str
     size_bytes: int
     created_at: str
-    old_backups_deleted: List[str] = []
+    old_backups_deleted: list[str] = []
     method: str
 
 
-@router.post("/backup-db", response_model=BackupOut)
+@router.post("/backup-db", tags=['Admin'], response_model=BackupOut)
 def backup_db(
     method: str = "binary",
     retention: int = 7,
@@ -148,9 +162,9 @@ def backup_db(
         else:
             result = backup_service.backup_database(retention=retention)
     except FileNotFoundError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Backup gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Backup gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -204,11 +218,11 @@ class BackupItemOut(BaseModel):
 
 
 class BackupListOut(BaseModel):
-    backups: List[BackupItemOut]
+    backups: list[BackupItemOut]
     count: int
 
 
-@router.get("/backups", response_model=BackupListOut)
+@router.get("/backups", tags=['Admin'], response_model=BackupListOut)
 def list_backups(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -240,7 +254,7 @@ class RestoreOut(BaseModel):
     method: str
 
 
-@router.post("/restore-db", response_model=RestoreOut)
+@router.post("/restore-db", tags=['Admin'], response_model=RestoreOut)
 def restore_db(
     payload: RestoreIn,
     db: Session = Depends(get_db),
@@ -266,11 +280,11 @@ def restore_db(
             auto_backup_before=payload.auto_backup_before,
         )
     except FileNotFoundError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Restore gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Restore gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -284,7 +298,7 @@ def restore_db(
 
 # ===== Manual Backup Trigger =====
 
-@router.post("/trigger-backup", response_model=BackupOut)
+@router.post("/trigger-backup", tags=['Admin'], response_model=BackupOut)
 def trigger_manual_backup(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -300,7 +314,7 @@ def trigger_manual_backup(
     try:
         result = trigger_backup_now()
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Backup gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Backup gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -344,11 +358,11 @@ class RecomputePorsiOut(BaseModel):
     note: str
 
 
-@router.post("/recompute-porsi", response_model=RecomputePorsiOut)
+@router.post("/recompute-porsi", tags=['Admin'], response_model=RecomputePorsiOut)
 def recompute_porsi_all(
-    tenant_id: Optional[int] = None,
+    tenant_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Recompute porsi_kantor_misi + porsi_kas_jemaat + porsi_khusus_* untuk semua kuitansi existing,
@@ -357,30 +371,32 @@ def recompute_porsi_all(
     Berguna setelah Auditor/Admin Ubah persentase pembagian dan ingin apply ke data historis juga.
 
     Args:
-        tenant_id: optional — kalau None, recompute semua tenant di Uni caller.
-                   Kalau diisi, recompute cuma tenant tsb (harus dalam Uni caller).
+        tenant_id: optional — kalau None, recompute semua tenant yang visible ke caller.
+                   Kalau diisi, recompute cuma tenant tsb (harus dalam scope caller).
 
     RBAC: ADMIN_UNI only.
     """
-    if current_user["role"] != "ADMIN_UNI":
+    if scope.role != "ADMIN_UNI":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni (Jerry)")
+
+    # FASE 4 S6-F: gunakan scope.visible_tenant_ids (single source of truth)
+    # daripada inline query Tenant.nama_uni == caller.nama_uni.
+    if not scope.visible_tenant_ids:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Caller belum terkait Uni / tidak ada tenant visible",
+        )
 
     # Determine tenant scope
     if tenant_id is not None:
-        target = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if not target:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant tidak ditemukan")
-        caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller or target.nama_uni != caller.nama_uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Tenant di luar Uni Anda")
+        if tenant_id not in scope.visible_tenant_ids:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Tenant di luar Uni Anda",
+            )
         tenant_ids = [tenant_id]
     else:
-        caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller or not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait Uni")
-        tenant_ids = [
-            t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()
-        ]
+        tenant_ids = list(scope.visible_tenant_ids)
 
     processed = 0
     updated = 0
@@ -397,8 +413,8 @@ def recompute_porsi_all(
             .first()
         )
         if not cfg:
-            # Fallback default
-            cfg_x, cfg_pt, cfg_kh = 1.0, 0.5, 0.5
+            # Fallback default (SDA doctrine T101: pct_x_jemaat=0.0, 100% X ke Misi)
+            cfg_x, cfg_pt, cfg_kh = 0.0, 0.5, 0.5
             cfg_xu, cfg_ptu, cfg_khu = 0.0, 0.0, 0.0
         else:
             cfg_x = cfg.pct_x_jemaat
@@ -416,10 +432,11 @@ def recompute_porsi_all(
         )
         for k in kuitansis:
             processed += 1
-            dist = calculate_distribution(
-                perpuluhan_x=k.perpuluhan_x_angka,
+            # FASE 2 S4/R3: pakai Jerry Model B (compute_porsi), bukan legacy calculate_distribution
+            porsi = compute_porsi(
+                x=k.perpuluhan_x_angka,
                 pt=k.pt_angka,
-                khusus=k.khusus_angka,
+                kh=k.khusus_angka,
                 pct_x_jemaat=cfg_x,
                 pct_pt_jemaat=cfg_pt,
                 pct_khusus_jemaat=cfg_kh,
@@ -427,19 +444,48 @@ def recompute_porsi_all(
                 pct_pt_uni=cfg_ptu,
                 pct_khusus_uni=cfg_khu,
             )
+            new_kantor_misi = porsi["pm_x"] + porsi["pm_pt"] + porsi["pm_kh"]
+            new_kas_jemaat = porsi["pj_x"] + porsi["pj_pt"] + porsi["pj_kh"]
             old_misi = k.porsi_kantor_misi
             old_jemaat = k.porsi_kas_jemaat
-            k.porsi_kantor_misi = dist["porsi_kantor_misi"]
-            k.porsi_kas_jemaat = dist["porsi_kas_jemaat"]
-            k.porsi_khusus_misi = dist["porsi_khusus_misi"]
-            k.porsi_khusus_jemaat = dist["porsi_khusus_jemaat"]
-            if old_misi != dist["porsi_kantor_misi"] or old_jemaat != dist["porsi_kas_jemaat"]:
+            k.porsi_kantor_misi = new_kantor_misi
+            k.porsi_kas_jemaat = new_kas_jemaat
+            k.porsi_khusus_misi = porsi["pm_kh"]
+            k.porsi_khusus_jemaat = porsi["pj_kh"]
+            # FASE 2 S5/R4: simpan porsi Uni juga
+            k.porsi_x_uni = porsi["pu_x"]
+            k.porsi_pt_uni = porsi["pu_pt"]
+            k.porsi_khusus_uni = porsi["pu_kh"]
+            # FASE 2 S6/R5: timestamp recompute + audit log per-kuitansi (sebelum commit)
+            k.porsi_recomputed_at = _now()
+            if old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat:
                 updated += 1
+            # Audit log per-kuitansi (untuk trace before/after snapshot)
+            db.add(AuditLog(
+                tenant_id=tid,
+                id_rekap_mingguan=k.id_rekap_mingguan,
+                nomor_kuitansi_token=k.nomor_kuitansi,
+                action="recompute_porsi",
+                porsi_dana_misi=new_kantor_misi,
+                payload_hash=(
+                    f"user={scope.user_id}|"
+                    f"old_misi={old_misi}|old_jemaat={old_jemaat}|"
+                    f"new_misi={new_kantor_misi}|new_jemaat={new_kas_jemaat}|"
+                    f"cfg=pct_x_j={cfg_x},pct_pt_j={cfg_pt},pct_kh_j={cfg_kh},"
+                    f"pct_x_u={cfg_xu},pct_pt_u={cfg_ptu},pct_kh_u={cfg_khu}|"
+                    f"changed={old_misi != new_kantor_misi or old_jemaat != new_kas_jemaat}"
+                ),
+            ))
 
+    # FASE 2 S6/R5: per-kuitansi audit log sudah ditulis di dalam loop.
+    # Summary batch log tetap dicatat agar mudah difilter di AuditLog page.
     db.add(AuditLog(
-        tenant_id=current_user["tenant_id"],
-        action=f"RECOMPUTE_PORSI_by_user_{current_user['id']}_tenants_{tenant_ids}",
-        payload_hash=f"processed={processed},updated={updated}",
+        tenant_id=scope.primary_tenant_id,
+        action=f"RECOMPUTE_PORSI_BATCH_user_{scope.user_id}",
+        payload_hash=(
+            f"batch|processed={processed}|updated={updated}|"
+            f"tenants={tenant_ids}"
+        ),
     ))
     db.commit()
 
@@ -447,89 +493,9 @@ def recompute_porsi_all(
         status="ok",
         kuitansi_processed=processed,
         kuitansi_updated=updated,
-        note=f"Recompute selesai. {updated} dari {processed} kuitansi ter-update.",
-    )
-
-
-# ===== Audit Logs =====
-
-class AuditLogOut(BaseModel):
-    id: int
-    tenant_id: int
-    action: str
-    payload_hash: Optional[str] = None
-    porsi_dana_misi: int = 0
-    id_rekap_mingguan: Optional[str] = None
-    created_at: str
-
-
-class AuditLogsOut(BaseModel):
-    logs: List[AuditLogOut]
-    count: int
-    page: int
-    per_page: int
-
-
-@router.get("/audit-logs", response_model=AuditLogsOut)
-def list_audit_logs(
-    page: int = 1,
-    per_page: int = 50,
-    action_like: Optional[str] = None,
-    tenant_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    List audit logs dengan pagination & filter.
-
-    Args:
-        page: page number (default 1)
-        per_page: items per page (default 50, max 200)
-        action_like: substring filter untuk action (e.g., "BLAST", "REGISTER")
-        tenant_id: filter by specific tenant (default: all)
-
-    RBAC: ADMIN_UNI only.
-    """
-    if current_user["role"] != "ADMIN_UNI":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni (Jerry)")
-
-    if per_page > 200:
-        per_page = 200
-    if per_page < 1:
-        per_page = 50
-    if page < 1:
-        page = 1
-
-    q = db.query(AuditLog)
-    if action_like:
-        q = q.filter(AuditLog.action.like(f"%{action_like}%"))
-    if tenant_id is not None:
-        q = q.filter(AuditLog.tenant_id == tenant_id)
-
-    total = q.count()
-    logs = (
-        q.order_by(AuditLog.id.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-        .all()
-    )
-
-    items = []
-    for l in logs:
-        items.append(AuditLogOut(
-            id=l.id,
-            tenant_id=l.tenant_id,
-            action=l.action or "UNKNOWN",
-            payload_hash=l.payload_hash,
-            porsi_dana_misi=l.porsi_dana_misi or 0,
-            id_rekap_mingguan=l.id_rekap_mingguan,
-            created_at=l.created_at.isoformat() if l.created_at else "",
-        ))
-
-    return AuditLogsOut(
-        logs=items,
-        count=total,
-        page=page,
-        per_page=per_page,
+        note=(
+            f"Recompute selesai. {updated} dari {processed} kuitansi ter-update. "
+            f"Audit log per-kuitansi sudah dicatat."
+        ),
     )
 

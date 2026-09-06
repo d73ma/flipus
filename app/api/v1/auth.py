@@ -1,33 +1,44 @@
 """
+
 Auth: login + JWT issuance + role + license guard (anti-clone, integrated)
 + forgot password endpoint (self-service reset via WA)
 + tenant status guard (Tahap 20 SaaS)
 + login lockout (v1.4 hardening) — 5 attempts → 15 min lock.
 """
-from datetime import datetime, timedelta, timezone
-from app.core.config import settings
-from app.core.security import utcnow
-from typing import Optional
+
+import logging
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limiter import limiter as _rate_limiter
 from app.core.security import (
     create_access_token,
+    create_refresh_token,
     decode_access_token,
     generate_tenant_signature,
     hash_password,
+    utcnow,
     verify_password,
 )
-from app.models.user import User
-from app.models.tenant import Tenant
 from app.models.audit import AuditLog
+
+# FASE 3-S3.S8 — refresh token server-side store.
+from app.models.refresh_token import RefreshToken
 from app.models.revoked_token import RevokedToken
-from app.utils.password_gen import generate_random_password, mask_password, validate_password_strength
-from app.services.whatsapp import send_simple_message
+from app.models.tenant import Tenant
+from app.models.user import User
 from app.services.tenant_service import slugify
+from app.services.whatsapp import send_simple_message
+from app.utils.password_gen import generate_random_password, mask_password, validate_password_strength
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -41,17 +52,22 @@ MANDATORY_2FA_ROLES = {"ADMIN_UNI", "AUDITOR_MISI"}
 class LoginIn(BaseModel):
     username: str
     password: str
-    tenant_slug: Optional[str] = None  # Tahap 20: optional tenant hint for SaaS
-    totp_code: Optional[str] = None  # T23-7: 2FA code (optional, kalau user sudah enable)
+    tenant_slug: str | None = None  # Tahap 20: optional tenant hint for SaaS
+    totp_code: str | None = None  # T23-7: 2FA code (optional, kalau user sudah enable)
 
 
 class TokenOut(BaseModel):
+    """FASE 3-S3.S8 — return both access_token (15 min) AND refresh_token (7 day)."""
     access_token: str
+    refresh_token: str  # NEW: long-lived refresh credential (server-side stored)
     token_type: str = "bearer"
+    # Access token TTL in seconds (15 min = 900). Client boleh pakai ini untuk
+    # schedule refresh (e.g., expire - 60 detik) supaya seamless UX.
+    expires_in: int = 900
     role: str
     tenant_id: int
-    tenant_slug: Optional[str] = None
-    tenant_status: Optional[str] = None
+    tenant_slug: str | None = None
+    tenant_status: str | None = None
 
 
 class TwoFactorRequiredOut(BaseModel):
@@ -65,7 +81,7 @@ class TwoFactorLoginIn(BaseModel):
     """Step 2: submit TOTP code dengan partial_token."""
     partial_token: str
     totp_code: str
-    backup_code: Optional[str] = None  # alternatif kalau TOTP device hilang
+    backup_code: str | None = None  # alternatif kalau TOTP device hilang
 
 
 class TwoFactorDisableIn(BaseModel):
@@ -77,13 +93,13 @@ class TwoFactorDisableIn(BaseModel):
 class ForgotPasswordIn(BaseModel):
     """Input boleh username ATAU nomor_whatsapp (auto-detect)."""
     identifier: str  # username OR nomor_wa
-    tenant_slug: Optional[str] = None  # Tahap 20: scope forgot-password by tenant
+    tenant_slug: str | None = None  # Tahap 20: scope forgot-password by tenant
 
 class ForgotPasswordOut(BaseModel):
     status: str  # "sent" / "not_found" / "rate_limited" / "no_wa"
     identifier: str
     message: str
-    new_password_masked: Optional[str] = None  # cuma untuk audit (masked)
+    new_password_masked: str | None = None  # cuma untuk audit (masked)
 
 
 def _audit_cross_tenant_attempt(
@@ -177,7 +193,7 @@ def _notify_security_event_wa(
             send_simple_message(admin.nomor_whatsapp, msg)
         except Exception:
             # Best-effort — kalau WA gagal, audit log sudah ada
-            pass
+            logger.exception("send_simple_message (admin notify) gagal; audit log tetap dicatat")
 
 
 # ===== Login Lockout (v1.4 hardening) =====
@@ -221,7 +237,7 @@ def _record_failed_login(db: Session, username: str, tenant_id: int) -> None:
 
 
 def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme),
+    token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -254,10 +270,10 @@ def get_current_user(
     iat_ts = payload.get("iat")
     pwd_changed = getattr(user, "password_changed_at", None)
     if iat_ts and pwd_changed:
-        iat_dt = datetime.fromtimestamp(iat_ts, tz=timezone.utc)
+        iat_dt = datetime.fromtimestamp(iat_ts, tz=UTC)
         # Strip tz info dari pwd_changed kalau naive
         if pwd_changed.tzinfo is None:
-            pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+            pwd_changed = pwd_changed.replace(tzinfo=UTC)
         if iat_dt < pwd_changed:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
@@ -314,6 +330,13 @@ def get_current_user(
         ensure_slug(db, tenant)
         db.commit()
 
+    # FASE 3-S3.S1 — update request-scoped contextvars so every subsequent
+    # log line emitted during this request carries tenant_id + user_id.
+    # (request_id was already set by RequestContextMiddleware.)
+    from app.core.logger import tenant_id_var, user_id_var
+    tenant_id_var.set(str(user.tenant_id))
+    user_id_var.set(str(user.id))
+
     return {
         "id": user.id,
         "role": user.role,
@@ -331,8 +354,9 @@ def require_roles(*roles: str):
     return checker
 
 
-@router.post("/login")
-def login(data: LoginIn, db: Session = Depends(get_db)):
+@router.post("/login", tags=['Auth'])
+@_rate_limiter.limit("10/minute")  # FASE 3 K1: anti-brute-force per-IP
+def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
     """
     Login dengan optional tenant_slug (Tahap 20) + optional TOTP (Tahap 23)
     + login lockout (v1.4 hardening).
@@ -456,7 +480,7 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
             try:
                 secret = decrypt_secret(user.totp_secret_encrypted)
             except Exception:
-                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gagal decrypt TOTP secret")
+                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'Gagal decrypt TOTP secret') from None
             if not verify_totp(secret, data.totp_code):
                 # Try backup code
                 from app.services.twofa_service import verify_backup_code
@@ -495,14 +519,21 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
                 payload_hash=user.username,
             ))
             db.commit()
-            # Issue full JWT
-            token = create_access_token({
+            # FASE 3-S3.S8 — issue BOTH access (15-min) AND refresh (7-day) tokens.
+            access = create_access_token({
                 "sub": user.id,
                 "role": user.role,
                 "tenant_id": user.tenant_id,
             })
+            refresh = create_refresh_token({
+                "sub": user.id,
+                "role": user.role,
+                "tenant_id": user.tenant_id,
+            })
+            _persist_refresh_token(db, refresh, user, request)
             return TokenOut(
-                access_token=token,
+                access_token=access,
+                refresh_token=refresh,
                 role=user.role,
                 tenant_id=user.tenant_id,
                 tenant_slug=user_tenant.slug,
@@ -521,21 +552,21 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
                 username=user.username,
             )
 
-    # No 2FA — direct token (legacy flow)
-    # T44: Record successful login untuk audit trail
-    db.add(AuditLog(
-        tenant_id=user.tenant_id,
-        action=f"LOGIN_SUCCESS_user_{user.id}",
-        payload_hash=user.username,
-    ))
-    db.commit()
-    token = create_access_token({
+    # FASE 3-S3.S8 — issue both tokens (legacy no-2FA path).
+    access = create_access_token({
         "sub": user.id,
         "role": user.role,
         "tenant_id": user.tenant_id,
     })
+    refresh = create_refresh_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    _persist_refresh_token(db, refresh, user, request)
     return TokenOut(
-        access_token=token,
+        access_token=access,
+        refresh_token=refresh,
         role=user.role,
         tenant_id=user.tenant_id,
         tenant_slug=user_tenant.slug,
@@ -543,7 +574,53 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordOut)
+# ===== FASE 3-S3.S8 — refresh token helpers =====
+
+def _client_ip(request: Request) -> str:
+    """Extract client IP (X-Forwarded-For aware, sama dengan auth.py lain)."""
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _persist_refresh_token(db: Session, refresh_jwt: str, user: User, request: Request) -> None:
+    """Simpan refresh token JTI ke tabel RefreshToken.
+
+    Dipanggil setiap kali login / refresh issue token baru. Kalau duplicate
+    (misalnya race condition), commit akan raise IntegrityError — kita catch
+    supaya tidak crash endpoint login user.
+    """
+    from sqlalchemy.exc import IntegrityError
+    try:
+        payload = decode_access_token(refresh_jwt) or {}
+    except Exception:
+        payload = {}
+    jti = payload.get("jti")
+    exp_ts = payload.get("exp")
+    if not jti or not exp_ts:
+        return  # defensive — tidak bisa store tanpa JTI/exp
+    expires_at = datetime.fromtimestamp(exp_ts, tz=UTC)
+    row = RefreshToken(
+        jti=jti,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        expires_at=expires_at,
+        created_ip=_client_ip(request),
+        created_user_agent=(request.headers.get("user-agent") or "")[:255],
+    )
+    try:
+        db.add(row)
+        db.commit()
+    except IntegrityError:
+        # JTI sudah ada (race) — rollback agar session bersih, tidak propagate.
+        db.rollback()
+
+
+@router.post("/forgot-password", tags=['Auth'], response_model=ForgotPasswordOut)
+@_rate_limiter.limit("3/minute")  # FASE 3 K1: anti-enumeration per-IP
 def forgot_password(
     data: ForgotPasswordIn,
     request: Request,
@@ -567,33 +644,16 @@ def forgot_password(
     if not identifier:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Identifier kosong")
 
-    # T78: Rate-limit per IP untuk cegah username enumeration.
-    # In-memory dict (process-local). Untuk multi-worker production, replace dengan Redis.
+    # T78 (diganti FASE 3 K1): Rate-limit per IP untuk cegah username enumeration.
+    # Sebelumnya pakai in-memory dict (process-local). Sekarang slowapi @limiter.limit("3/minute")
+    # di atas yang handle — Redis-ready jika pindah ke multi-worker (lihat app/core/rate_limiter.py).
     client_ip = request.client.host if request.client else "unknown"
-    fp_window = getattr(forgot_password, "_ip_window", None)
-    if fp_window is None:
-        fp_window = {}
-        setattr(forgot_password, "_ip_window", fp_window)
-    now_ts = utcnow().timestamp()
-    # Bersihkan entry > 5 menit
-    cutoff_ts = now_ts - 300
-    fp_window = {ip: ts for ip, ts in fp_window.items() if ts > cutoff_ts}
-    setattr(forgot_password, "_ip_window", fp_window)
-    ip_count = sum(1 for ts in fp_window.values() if ts > now_ts - 60)  # max 5 per menit
-    if ip_count >= 5:
-        # Audit
-        db.add(AuditLog(
-            tenant_id=0,
-            action=f"FORGOT_PASSWORD_IP_RATE_LIMIT_ip_{client_ip}_count_{ip_count}",
-            payload_hash=identifier[:32],
-        ))
-        db.commit()
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "Terlalu banyak percobaan dari IP Anda. Coba lagi dalam 1 menit.",
-        )
-    fp_window[client_ip] = now_ts
-    setattr(forgot_password, "_ip_window", fp_window)
+    # FASE 3-S2.T4: audit log ENHANCED dengan IP + UA untuk forensic investigation.
+    xff_header = request.headers.get("x-forwarded-for", "")
+    if xff_header:
+        first_xff = xff_header.split(",")[0].strip()
+        client_ip = client_ip + " (xff=" + first_xff + ")"
+    ua = request.headers.get("user-agent", "unknown")[:200]
 
     # Tahap 20 SaaS: resolve tenant_slug kalau ada
     target_tenant_id = None
@@ -652,7 +712,7 @@ def forgot_password(
     audit_req = AuditLog(
         tenant_id=user.tenant_id,
         action="PASSWORD_RESET_REQUESTED_user_{}".format(user.id),
-        payload_hash=str(user.id),
+        payload_hash="{}|ip={}|ua={}".format(user.id, client_ip, ua)[:64],
     )
     db.add(audit_req)
     db.commit()
@@ -686,7 +746,7 @@ def forgot_password(
     audit_sent = AuditLog(
         tenant_id=user.tenant_id,
         action=f"PASSWORD_RESET_SENT_user_{user.id}_wa_{wa_status}",
-        payload_hash=str(user.id),
+        payload_hash="{}|ip={}|ua={}".format(user.id, client_ip, ua)[:64],
     )
     db.add(audit_sent)
     db.commit()
@@ -707,7 +767,136 @@ class LogoutOut(BaseModel):
     message: str
 
 
-@router.post("/logout", response_model=LogoutOut)
+# ===== FASE 3-S3.S8 — refresh token endpoints =====
+
+class RefreshIn(BaseModel):
+    """Body untuk POST /auth/refresh. Client kirim refresh_token dari login/refresh sebelumnya."""
+    refresh_token: str
+
+
+@router.post("/refresh", tags=['Auth'], response_model=TokenOut)
+@_rate_limiter.limit("30/minute")
+def refresh(
+    data: RefreshIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """FASE 3-S3.S8 — Exchange refresh token untuk access token baru + new refresh (rotation).
+
+    Flow:
+      1. Decode JWT → verifikasi signature + cek typ="refresh"
+      2. Cari RefreshToken row by JTI
+         - kalau tidak ada → 401 (token not issued by us / forged)
+         - kalau revoked_at ≠ None → 401
+         - kalau used_at ≠ None → DETEKSI REUSE → revoke seluruh chain user
+      3. Verify user masih ada & aktif
+      4. Mark old row used_at=now()
+      5. Issue new access (15-min) + new refresh (7-day)
+      6. Persist new refresh row
+      7. Return TokenOut
+    """
+    payload = decode_access_token(data.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token (signature / format)",
+        )
+    # Anti privilege-escalation: jangan boleh kirim access token sebagai refresh.
+    if payload.get("typ") != "refresh":
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token type salah: typ={payload.get('typ')!r}, diharapkan 'refresh'",
+        )
+
+    jti = payload.get("jti")
+    sub = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+    if not jti or not sub:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token tidak punya JTI/sub (legacy token?)",
+        )
+
+    rt = db.query(RefreshToken).filter(RefreshToken.jti == jti).first()
+    if not rt:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not recognized",
+        )
+    if rt.revoked_at is not None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail=f"Refresh token sudah di-revoke: {rt.revoked_reason}",
+        )
+
+    if rt.used_at is not None:
+        # Reuse detection — kemungkinan token dicuri. Revoke seluruh chain.
+        all_rt = db.query(RefreshToken).filter(
+            RefreshToken.user_id == rt.user_id,
+            RefreshToken.revoked_at.is_(None),
+        ).all()
+        for r in all_rt:
+            r.revoked_at = datetime.now(UTC)
+            r.revoked_reason = "reuse_detected"
+        db.add(AuditLog(
+            tenant_id=rt.tenant_id,
+            action=f"REFRESH_REUSE_DETECTED_user_{rt.user_id}_revoked_{len(all_rt)}",
+            payload_hash=jti[:32],
+        ))
+        db.commit()
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token sudah dipakai. Semua sesi direvoke. Silakan login ulang.",
+        )
+
+    user = db.query(User).filter(User.id == rt.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="User account sudah non-aktif",
+        )
+    if user.tenant_id != tenant_id:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Tenant mismatch in refresh token",
+        )
+
+    # SUCCESS — rotate.
+    rt.used_at = datetime.now(UTC)
+    rt.redeemed_ip = _client_ip(request)
+    rt.redeemed_user_agent = (request.headers.get("user-agent") or "")[:255]
+
+    new_access = create_access_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    new_refresh = create_refresh_token({
+        "sub": user.id,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
+    })
+    _persist_refresh_token(db, new_refresh, user, request)
+
+    db.add(AuditLog(
+        tenant_id=user.tenant_id,
+        action=f"REFRESH_OK_user_{user.id}_rotated_{jti[:12]}",
+        payload_hash=user.username,
+    ))
+    db.commit()
+
+    user_tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    return TokenOut(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        role=user.role,
+        tenant_id=user.tenant_id,
+        tenant_slug=user_tenant.slug if user_tenant else None,
+        tenant_status=user_tenant.status if user_tenant else None,
+    )
+
+
+@router.post("/logout", tags=['Auth'], response_model=LogoutOut)
 def logout(
     request: Request,
     current: dict = Depends(get_current_user),
@@ -743,7 +932,7 @@ def logout(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token tidak punya JTI (legacy token, silakan login ulang)")
 
     # Convert exp timestamp → datetime UTC
-    expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at = datetime.fromtimestamp(exp_ts, tz=UTC) if exp_ts else datetime.now(UTC) + timedelta(hours=24)
 
     # Idempotent — kalau sudah pernah di-revoke, return success tanpa duplicate row
     existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
@@ -763,10 +952,22 @@ def logout(
     )
     db.add(revoked)
 
+    # FASE 3-S3.S8 — kalau access token dipakai, revoke semua refresh token
+    # aktif milik user ini (semantik logout-all). Untuk logout per-device,
+    # client harus kirim refresh_token eksplisit (planned v1.6).
+    rt_rows = db.query(RefreshToken).filter(
+        RefreshToken.user_id == current["id"],
+        RefreshToken.revoked_at.is_(None),
+        RefreshToken.used_at.is_(None),
+    ).all()
+    for rt in rt_rows:
+        rt.revoked_at = datetime.now(UTC)
+        rt.revoked_reason = "logout_access_token"
+
     # Audit log
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
-        action=f"LOGOUT_user_{current['id']}",
+        action=f"LOGOUT_user_{current['id']}_rt_revoked={len(rt_rows)}",
         payload_hash=jti[:32],  # simpan prefix jti sebagai audit trail
     ))
     db.commit()
@@ -790,9 +991,10 @@ class ChangePasswordOut(BaseModel):
     message: str
 
 
-@router.post("/change-password", response_model=ChangePasswordOut)
+@router.post("/change-password", tags=['Auth'], response_model=ChangePasswordOut)
 def change_password(
     data: ChangePasswordIn,
+    request: Request,
     current: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -808,10 +1010,9 @@ def change_password(
        - tidak boleh common password (top 100)
        - tidak boleh sama dengan current
     4. Auto-revoke semua token milik user ini (paksa logout semua device)
-    5. Audit log + notify WA ke user (best-effort)
+    5. Audit log (T4 — enhanced dengan IP address + user-agent untuk forensic) + notify WA ke user (best-effort)
     """
     from app.core.security import hash_password, verify_password
-    from app.utils.password_gen import validate_password_strength
 
     # 1) current password check
     user = db.query(User).filter(User.id == current["id"]).first()
@@ -833,7 +1034,7 @@ def change_password(
 
     # 4) Update hash
     user.password_hash = hash_password(data.new_password)
-    user.last_password_change_at = datetime.now(timezone.utc)
+    user.last_password_change_at = datetime.now(UTC)
 
     # 5) Auto-revoke semua token user ini (logout semua device)
     # Catatan: tidak punya list JTI — solusi: tambah kolom user_id ke revoked_tokens
@@ -841,13 +1042,23 @@ def change_password(
     # increment "token_epoch" di user, dan validasi token mengandung epoch matching.
     # Untuk simplicity v1.5-D: pakai password_changed_at sebagai invalidation timestamp.
     # Token yang iat < password_changed_at akan ditolak di get_current_user.
-    user.password_changed_at = datetime.now(timezone.utc)
+    user.password_changed_at = datetime.now(UTC)
 
-    # Audit
+    # FASE 3-S2.T4 — Audit log ENHANCED dengan IP + UA untuk forensic.
+    # Audit log ini penting kalau akun dibajak — attacker biasanya ganti password
+    # supaya korban tidak bisa login & tidak bisa reset. Dengan IP + UA, admin
+    # bisa cek: "apakah perubahan ini dari IP/lokasi yang biasa dipakai user?"
+    client_ip = request.client.host if request.client else "unknown"
+    # Perhatikan X-Forwarded-For kalau di belakang reverse proxy (nginx/cloudflare).
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        client_ip = f"{client_ip} (xff={xff.split(',')[0].strip()})"
+    ua = request.headers.get("user-agent", "unknown")[:200]
+
     db.add(AuditLog(
         tenant_id=user.tenant_id,
         action=f"PASSWORD_CHANGED_user_{user.id}",
-        payload_hash=user.username,
+        payload_hash=f"{user.username}|ip={client_ip}|ua={ua}",
     ))
     db.commit()
 
@@ -858,13 +1069,13 @@ def change_password(
             send_simple_message(
                 target=user.nomor_whatsapp,
                 message=(
-                    f"🔐 Password FLIPUS Anda telah diganti pada {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}.\n"
+                    f"🔐 Password FLIPUS Anda telah diganti pada {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}.\n"
                     f"Semua session lama otomatis logout. "
                     f"Jika ini BUKAN Anda, hubungi Admin Uni SEGERA."
                 ),
             )
         except Exception:
-            pass  # best-effort
+            logger.exception("send_simple_message (change-password notify) gagal")  # best-effort
 
     return ChangePasswordOut(
         status="ok",

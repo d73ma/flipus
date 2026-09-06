@@ -25,10 +25,10 @@ from pathlib import Path
 # Add project root to sys.path so 'app' import works
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.database import SessionLocal, engine
+from app.core.database import SessionLocal
 from app.models.master import PersentaseConfig
-from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
 from app.utils.porsi_calculator import compute_porsi
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")

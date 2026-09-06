@@ -1,4 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, func, Index
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+
 from app.core.database import Base
 
 
@@ -27,60 +32,79 @@ class Tenant(Base):
       - active:    bisa login & transaksi
       - suspended: sementara ditahan (admin hold)
       - archived:   jangka panjang nonaktif (misal jemaat merger)
+
+    Migration notes (FASE 3 Sprint 4 — S4-E):
+      - Migrated dari `Column[T]` legacy ke SQLAlchemy 2.0 `Mapped[T]` style.
+      - Field types sekarang eksplisit via `Mapped[...]` annotation, sehingga
+        mypy bisa infer tipe kolom tanpa `disable_error_code = ["arg-type", "assignment"]`.
+      - Runtime behavior identik: kolom, index, FK, default, onupdate semua
+        diwariskan dari `mapped_column(...)` kwargs yang sama dengan `Column(...)`.
     """
 
     __tablename__ = "tenants"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     # ===== License guard (legacy, preserved) =====
-    tenant_signature = Column(String(64), unique=True, nullable=False, index=True)
+    tenant_signature: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
 
     # ===== Organizational identity (Level 1-3) =====
-    nama_uni = Column(String(120), nullable=False)
-    nama_kantor_misi = Column(String(120), nullable=False)
-    nama_jemaat_lokal = Column(String(120), nullable=False)
+    nama_uni: Mapped[str] = mapped_column(String(120), nullable=False)
+    nama_kantor_misi: Mapped[str] = mapped_column(String(120), nullable=False)
+    nama_jemaat_lokal: Mapped[str] = mapped_column(String(120), nullable=False)
 
     # Pejabat (Level 2)
-    nama_pendeta = Column(String(120))
-    nama_ketua_keuangan = Column(String(120))
-    nama_bendahara = Column(String(120))
+    nama_pendeta: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, default=None)
+    nama_ketua_keuangan: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, default=None)
+    nama_bendahara: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, default=None)
 
     # Inisial jemaat (untuk format nomor kuitansi: 001/NT/I/27).
-    initial_jemaat = Column(String(4), nullable=True)
+    initial_jemaat: Mapped[Optional[str]] = mapped_column(String(4), nullable=True, default=None)
 
     # FK ke Misi/Konferens (opsional, untuk aggregation tier 2)
-    misi_konferens_id = Column(Integer, ForeignKey("misi_konferens.id"), nullable=True)
+    misi_konferens_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("misi_konferens.id"),
+        nullable=True,
+        default=None,
+    )
 
     # ===== SaaS identity (Tahap 20) =====
-    slug = Column(String(80), unique=True, nullable=True, index=True)
-    subdomain = Column(String(80), unique=True, nullable=True, index=True)
-    plan = Column(String(20), nullable=False, default="free")
-    status = Column(String(20), nullable=False, default="active")
+    slug: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True, index=True, default=None)
+    subdomain: Mapped[Optional[str]] = mapped_column(String(80), unique=True, nullable=True, index=True, default=None)
+    plan: Mapped[str] = mapped_column(String(20), nullable=False, default="free")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
     # Owner metadata
-    owner_user_id = Column(Integer, ForeignKey("users.id", use_alter=True, name="fk_tenants_owner_user_alter"), nullable=True)
-    contact_email = Column(String(120), nullable=True)
-    contact_phone = Column(String(32), nullable=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", use_alter=True, name="fk_tenants_owner_user_alter"),
+        nullable=True,
+        default=None,
+    )
+    contact_email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, default=None)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default=None)
 
     # ===== Branding (Tahap 21) =====
     # Logo URL/path (relative ke /storage, served via static endpoint)
-    logo_url = Column(String(255), nullable=True)
+    logo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
     # Primary color (hex, misal "#1B4332" = Sabbath green). Default ke green theme.
-    primary_color = Column(String(7), nullable=False, default="#1B4332")
+    primary_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#1B4332")
     # Secondary color (hex). Default ke cream theme.
-    secondary_color = Column(String(7), nullable=False, default="#F5EFE0")
+    secondary_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#F5EFE0")
     # Footer text (tampil di PDF + akhir pesan WA)
-    footer_text = Column(String(255), nullable=True)
+    footer_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
     # Updated branding timestamp + actor
-    branding_updated_at = Column(DateTime, nullable=True)
-    branding_updated_by = Column(Integer, ForeignKey("users.id", use_alter=True, name="fk_tenants_branding_updated_by_alter"), nullable=True)
+    branding_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+    branding_updated_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", use_alter=True, name="fk_tenants_branding_updated_by_alter"),
+        nullable=True,
+        default=None,
+    )
 
     # ===== Lifecycle =====
     # is_active tetap dipakai (legacy alias untuk status="active")
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
     # Composite index untuk query by uni + misi
     __table_args__ = (

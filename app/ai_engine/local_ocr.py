@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 from pathlib import Path
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -26,35 +27,43 @@ Aturan:
 """
 
 def extract_with_ollama(image_path: str) -> dict:
+    from app.core.metrics import observe_ai_inference
+
     path = Path(image_path)
     if not path.exists():
+        # File missing = pre-inference reject, tidak masuk histogram.
         return {"error": "FILE_NOT_FOUND", "path": image_path}
 
     try:
         import ollama
     except ImportError:
+        # Lib missing = pre-inference reject, tidak masuk histogram.
         return {"error": "OLLAMA_LIB_MISSING", "fallback": True}
 
-    try:
-        with open(path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode()
+    model_name = getattr(settings, "OLLAMA_MODEL", "unknown")
+    with observe_ai_inference(provider="ollama_local", model=model_name) as obs:
+        try:
+            with open(path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode()
 
-        response = ollama.chat(
-            model=settings.OLLAMA_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": PROMPT_OCR,
-                    "images": [img_b64],
-                }
-            ],
-            options={"temperature": 0},
-        )
-        raw = response["message"]["content"]
-        return {"raw": raw, "source": "ollama_local"}
-    except Exception as exc:
-        logger.warning("Ollama gagal: %s — fallback manual.", exc)
-        return {"error": "OLLAMA_UNREACHABLE", "fallback": True, "detail": str(exc)}
+            response = ollama.chat(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": PROMPT_OCR,
+                        "images": [img_b64],
+                    }
+                ],
+                options={"temperature": 0},
+            )
+            raw = response["message"]["content"]
+            obs.set_outcome("ok")
+            return {"raw": raw, "source": "ollama_local"}
+        except Exception as exc:
+            obs.set_outcome("error")
+            logger.warning("Ollama gagal: %s — fallback manual.", exc)
+            return {"error": "OLLAMA_UNREACHABLE", "fallback": True, "detail": str(exc)}
 
 def parse_ocr_payload(raw_text: str) -> dict:
     """Ambil JSON object dari teks yang mungkin ada penjelasan di luarnya."""

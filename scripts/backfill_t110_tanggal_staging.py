@@ -17,11 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
-from app.models.tenant import Tenant
-from app.models.transaction import Kuitansi
+from sqlalchemy.orm import Session  # noqa: E402
 
+from app.core.database import SessionLocal  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
+from app.models.transaction import Kuitansi  # noqa: E402
 
 # T110: target tanggal — Sabat ke-34, 22 Agustus 2026 (per Jerry 2026-08-26)
 TARGET_TANGGAL = "2026-08-22"
@@ -31,7 +31,7 @@ def main():
     db: Session = SessionLocal()
     try:
         sabat_tgl = TARGET_TANGGAL
-        tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+        tenants = db.query(Tenant).filter(Tenant.is_active.is_(True)).all()
         total_updated = 0
         for t in tenants:
             # Cari Kuitansi finalized di tenant ini yang tanggal_sabat != sabat_tgl
@@ -39,7 +39,7 @@ def main():
                 db.query(Kuitansi)
                 .filter(
                     Kuitansi.tenant_id == t.id,
-                    Kuitansi.is_finalized == True,
+                    Kuitansi.is_finalized.is_(True),
                     Kuitansi.status == "finalized",
                     Kuitansi.tanggal_sabat != sabat_tgl,
                 )

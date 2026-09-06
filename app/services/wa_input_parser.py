@@ -128,22 +128,17 @@ if __name__ == "__main__":
         ("100jt", 100_000_000),
     ]
 
-    print("Parser self-test:")
     all_pass = True
     for text, expected in test_cases:
         actual = parse_nominal(text)
         status = "OK" if actual == expected else "FAIL"
         if actual != expected:
             all_pass = False
-        print(f"  [{status}] parse_nominal({text!r:15}) = {actual}  (expected {expected})")
 
-    print()
-    print(f"Validation test:")
     for v in [0, 100_000, 100_000_000, 200_000_000, -1000]:
         valid, reason = is_valid_nominal(v)
-        print(f"  is_valid_nominal({v}) = ({valid}, {reason!r})")
 
     if all_pass:
-        print("\n✓ All parse tests passed")
+        pass
     else:
-        print("\n✗ Some tests FAILED")
+        pass

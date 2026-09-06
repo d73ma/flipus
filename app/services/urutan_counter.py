@@ -4,17 +4,18 @@ FLIPUS v1.1 — Counter urutan kuitansi per jemaat per bulan.
 Reset otomatis tiap awal bulan (counter kembali ke 1).
 """
 from datetime import datetime
-from typing import Optional
-from sqlalchemy.orm import Session
+
 from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.models.transaction import Kuitansi
 
 
 def get_next_urutan(
     db: Session,
     tenant_id: int,
-    bulan: Optional[int] = None,
-    tahun: Optional[int] = None,
+    bulan: int | None = None,
+    tahun: int | None = None,
 ) -> int:
     """
     Hitung nomor urut berikutnya untuk jemaat tertentu di bulan/tahun tertentu.

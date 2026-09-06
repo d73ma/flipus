@@ -1,0 +1,83 @@
+# FLIPUS-specific gitleaks ruleset
+# FASE 5 Sprint 3
+#
+# Extends the default gitleaks rules with patterns that matter for
+# THIS project but aren't in the default ruleset:
+#
+#   - LICENSE_TENANT_SIGNATURE_SALT (per-uni signing key — multi-tenant)
+#   - PII_ENCRYPTION_KEY (Fernet key for at-rest encryption)
+#   - FONNTE_TOKEN, GEMINI_API_KEY (3rd-party API tokens we use)
+#   - DATABASE_URL with password embedded
+#
+# The default gitleaks ruleset already catches generic patterns:
+# AWS keys, GitHub PATs, Stripe keys, JWTs, generic API keys.
+# This file adds project-specific patterns only.
+#
+# Reference: https://github.com/gitleaks/gitleaks/blob/master/configs/gitleaks.toml
+
+title = "FLIPUS custom gitleaks rules"
+
+# All paths are scanned by default. The defaults already exclude
+# .git, node_modules, vendor dirs. We don't add custom excludes.
+
+[[rules]]
+id = "flipus-pii-encryption-key"
+description = "PII_ENCRYPTION_KEY — Fernet base64 key used to encrypt PII at rest"
+# Fernet keys are url-safe base64: 44 chars ending with '='
+regex = '''(?i)(?:PII_ENCRYPTION_KEY|FLIPUS_PII_KEY)\s*[=:]\s*["']?([A-Za-z0-9_\-]{43}=)["']?'''
+keywords = ["PII_ENCRYPTION_KEY", "FLIPUS_PII_KEY"]
+entropy = 3.5
+
+[[rules]]
+id = "flipus-license-tenant-salt"
+description = "LICENSE_TENANT_SIGNATURE_SALT — per-uni license signing salt"
+regex = '''(?i)LICENSE_TENANT_SIGNATURE_SALT\s*[=:]\s*["']?([A-Za-z0-9_\-]{16,})["']?'''
+keywords = ["LICENSE_TENANT_SIGNATURE_SALT"]
+
+[[rules]]
+id = "flipus-fonnte-token"
+description = "Fonnte WhatsApp API token"
+# Fonnte tokens are ~40-char random strings prefixed with the token= query param
+regex = '''(?i)(?:FONNTE_TOKEN|fonnte_token)\s*[=:]\s*["']?([A-Za-z0-9_\-]{30,})["']?'''
+keywords = ["FONNTE_TOKEN", "fonnte_token"]
+entropy = 3.5
+
+[[rules]]
+id = "flipus-gemini-api-key"
+description = "Google Gemini API key (AIza-style prefix)"
+regex = '''(?i)(?:GEMINI_API_KEY|gemini_api_key)\s*[=:]\s*["']?(AIza[0-9A-Za-z_\-]{35})["']?'''
+keywords = ["GEMINI_API_KEY", "gemini_api_key"]
+
+[[rules]]
+id = "flipus-database-url-with-password"
+description = "DATABASE_URL containing a password (Postgres/MySQL connection string)"
+# Matches postgresql://user:password@host  or  mysql://user:password@host
+regex = '''(?i)(?:DATABASE_URL|DATABASE_URL_CLOUD|DATABASE_URL_LOCAL)\s*[=:]\s*["']?(?:postgres(?:ql)?|mysql|mariadb)://[^\s@"':]+:([^\s@"']+)@[^\s"']+["']?'''
+keywords = ["DATABASE_URL"]
+entropy = 2.5
+
+[[rules]]
+id = "flipus-jwt-secret-key"
+description = "FLIPUS_SECRET_KEY / SECRET_KEY used for JWT signing"
+# We use secrets.token_urlsafe(32) → 43-char url-safe base64 (no padding)
+regex = '''(?i)(?:FLIPUS_)?SECRET_KEY\s*[=:]\s*["']?([A-Za-z0-9_\-]{32,})["']?'''
+keywords = ["SECRET_KEY", "FLIPUS_SECRET_KEY"]
+entropy = 3.5
+
+# Allowlist: the .env.example file contains placeholder values that match
+# the regexes above. We DO want to scan it to remind contributors not to
+# commit real values, but allowlist its known placeholder content.
+[allowlist]
+paths = [
+    # Only .env.example is exempt — its placeholder values (e.g.
+    # "ci-stub-..." or "your-gemini-api-key-here") are obvious dummies.
+]
+# Regex allowlist — explicitly skip the placeholder strings used in .env.example
+regexes = [
+    '''ganti-dengan-[a-z0-9-]+''',
+    '''your-[a-z0-9-]+-here''',
+    '''ci-stub-[a-z0-9-]+''',
+    '''dummy[a-z0-9-]+''',
+]
+# Do NOT allowlist entire files: if a real value is committed in .env
+# or .env.bak, we want gitleaks to flag it. Only string patterns are exempt.

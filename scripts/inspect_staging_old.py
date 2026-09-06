@@ -13,9 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.core.database import SessionLocal
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
+from app.core.database import SessionLocal  # noqa: E402
+from app.models.transaction import Kuitansi  # noqa: E402
 
 
 def main():
@@ -29,7 +28,7 @@ def main():
         # Group semua kuitansi finalized by tanggal_sabat
         rows = (
             db.query(Kuitansi)
-            .filter(Kuitansi.is_finalized == True, Kuitansi.status == "finalized")
+            .filter(Kuitansi.is_finalized.is_(True), Kuitansi.status == "finalized")
             .all()
         )
         by_date: dict[str, list[Kuitansi]] = {}

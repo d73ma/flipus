@@ -1,4 +1,4 @@
-fastapi==0.116.1
+fastapi==0.141.1  # FASE 5 Sprint 4 — upgrade dari 0.116.1 agar starlette 0.49+ kompatibel
 uvicorn[standard]==0.35.0
 sqlalchemy==2.0.35
 pydantic==2.12.0
@@ -6,9 +6,20 @@ pydantic-settings==2.15.0
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt>=4.0,<5.0
-python-multipart==0.0.12
-Pillow==11.1.0
-cryptography==44.0.3
+
+# FASE 5 Sprint 4 — upgrade deps untuk menutup pip-audit vulns.
+# cryptography 50.0.1 menutup 6 advisories (44.0.3 rentan).
+cryptography==50.0.1
+# Pillow 12.3.0 menutup 14 advisories (11.1.0 rentan, utamanya image-processing CVE).
+Pillow==12.3.0
+# python-multipart 0.0.32 menutup 7 advisories (0.0.12 rentan, multipart-parser DoS).
+python-multipart==0.0.32
+# Starlette 0.52.1 menutup 1 advisory (PYSEC-2026-1942). 5 advisories lain
+# butuh starlette 1.0+ yang belum kompatibel dengan prometheus-fastapi-instrumentator.
+# Di-suppress via `pip-audit --ignore-vuln` di Makefile + ci.yml — lihat rationale
+# di FASE5_SPRINT4_SUMMARY.md §A2.
+starlette>=0.52.1,<1.0  # transitif via fastapi>=0.123.0
+
 apscheduler==3.10.4
 httpx==0.28.1
 ollama==0.4.7
@@ -17,3 +28,27 @@ reportlab==4.2.5
 openpyxl==3.1.5
 pyotp==2.9.0
 qrcode==7.4.2
+
+# FASE 3 Sprint 1: Rate limiting + file validation
+slowapi==0.1.9
+filetype==1.2.0
+limits[redis]==3.13.0
+
+# FASE 3 Sprint 4 — Developer tooling
+mypy==1.13.0
+pytest-cov==5.0.0
+ruff==0.7.4
+
+# FASE 5 Sprint 2 — Prometheus metrics
+prometheus_client==0.21.1
+prometheus-fastapi-instrumentator==7.0.0
+
+# FASE 5 Sprint 3 — Security tooling (used in CI)
+# bandit: AST-based security linter for common Python vulns (eval,
+#         subprocess shell=True, weak hash, etc.). Pure offline.
+bandit==1.7.10
+# pip-audit: official PyPA tool. Audits installed deps against the OSV /
+#            PyPI Advisory DB. Works offline after first download of the
+#            vulnerability snapshot. Replaces safety (which went
+#            commercial in v3 and now requires an API key).
+pip-audit==2.7.3

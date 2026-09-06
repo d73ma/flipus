@@ -8,17 +8,16 @@ Return dict berisi user_id, username, password (plain, untuk ditampilkan sekali
 di response register endpoint dan dikirim via Fonnte).
 """
 
-from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password, generate_tenant_signature
-from app.models.user import User
-from app.models.tenant import Tenant
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
+from app.core.security import generate_tenant_signature, hash_password
 from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
+from app.models.tenant import Tenant
+from app.models.user import User
+from app.services.tenant_service import generate_unique_slug
 from app.utils.password_gen import generate_random_password
-from app.services.tenant_service import generate_unique_slug, ensure_slug
 
 
 # Username generator conventions
@@ -151,7 +150,7 @@ def _create_user(
     tenant_id: int,
     username: str,
     nama_lengkap: str,
-    nomor_whatsapp: Optional[str],
+    nomor_whatsapp: str | None,
     role: str,
     password: str,
 ) -> User:
@@ -196,12 +195,12 @@ def register_pendeta(
     nama_jemaat: str,
     initial_jemaat: str,
     nama_pendeta: str,
-    wa_pendeta: Optional[str],
+    wa_pendeta: str | None,
     nama_ketua: str,
-    wa_ketua: Optional[str],
+    wa_ketua: str | None,
     nama_bendahara: str = "",
-    wa_bendahara: Optional[str] = None,
-) -> Tuple[User, str, Tenant]:
+    wa_bendahara: str | None = None,
+) -> tuple[User, str, Tenant]:
     """
     Create Jemaat (Tenant) + User Pendeta atomic.
     Returns: (user, plain_password, tenant)
@@ -232,18 +231,18 @@ def register_auditor(
     uni: Uni,
     misi: MisiKonferens,
     nama_bendahara_misi: str,
-    wa_bendahara_misi: Optional[str],
+    wa_bendahara_misi: str | None,
     nama_auditor: str,
-    wa_auditor: Optional[str],
+    wa_auditor: str | None,
     pct_x_jemaat: float,
     pct_pt_jemaat: float,
     pct_khusus_jemaat: float = 0.0,
-) -> Tuple[User, str, MisiKonferens]:
+) -> tuple[User, str, MisiKonferens]:
     """
     Create PersentaseConfig (MISI) + User Auditor atomic.
     Returns: (user, plain_password, misi)
     """
-    cfg = _get_or_create_persentase_misi(
+    _get_or_create_persentase_misi(
         db, misi, pct_x_jemaat, pct_pt_jemaat, pct_khusus_jemaat,
     )
     username = _username_for_auditor(misi.kode)
@@ -287,18 +286,18 @@ def register_admin(
     db: Session,
     uni: Uni,
     nama_bendahara_uni: str,
-    wa_bendahara_uni: Optional[str],
+    wa_bendahara_uni: str | None,
     nama_admin_uni: str,
-    wa_admin_uni: Optional[str],
+    wa_admin_uni: str | None,
     pct_x_uni: float,
     pct_pt_uni: float,
     pct_khusus_uni: float = 0.0,
-) -> Tuple[User, str]:
+) -> tuple[User, str]:
     """
     Create PersentaseConfig (UNI) + User Admin atomic.
     Returns: (user, plain_password)
     """
-    cfg = _get_or_create_persentase_uni(
+    _get_or_create_persentase_uni(
         db, uni, pct_x_uni, pct_pt_uni, pct_khusus_uni,
     )
     username = _username_for_admin(uni.kode)
@@ -309,7 +308,7 @@ def register_admin(
     # Admin Uni juga butuh tenant_id — sama seperti Auditor, buat placeholder
     tenant = (
         db.query(Tenant)
-        .filter(Tenant.misi_konferens_id == None)
+        .filter(Tenant.misi_konferens_id is None)
         .filter(Tenant.nama_uni == uni.nama_resmi)
         .first()
     )

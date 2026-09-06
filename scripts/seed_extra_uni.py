@@ -29,9 +29,8 @@ from pathlib import Path
 # Pastikan root project masuk ke path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.database import Base, engine, SessionLocal
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-
+from app.core.database import Base, SessionLocal, engine
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
 
 UNI_DEFS = [
     {

@@ -19,31 +19,36 @@ RBAC:
 - Others: 403 (kecuali /me dan /resolve)
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+
+# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
+from app.core.upload_validator import validate_logo
+from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, Uni
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.master import MisiKonferens, Uni
-from app.models.audit import AuditLog
-from app.services.tenant_service import (
-    slugify,
-    generate_unique_slug,
-    get_tenant_by_slug,
-    get_tenant_by_slug_or_subdomain,
-)
 from app.services.branding_service import (
-    upload_logo,
-    update_branding,
+    STORAGE_ROOT,
+    _validate_hex_color,
     get_logo_path,
     get_tenant_branding_dict,
-    _validate_hex_color,
-    STORAGE_ROOT,
+    update_branding,
+    upload_logo,
+)
+from app.services.tenant_service import (
+    get_tenant_by_slug_or_subdomain,
+    slugify,
 )
 
 router = APIRouter()
@@ -54,24 +59,24 @@ router = APIRouter()
 class TenantOut(BaseModel):
     id: int
     slug: str
-    subdomain: Optional[str]
+    subdomain: str | None
     nama_uni: str
     nama_kantor_misi: str
     nama_jemaat_lokal: str
     plan: str
     status: str
     is_active: bool
-    contact_email: Optional[str]
-    contact_phone: Optional[str]
-    owner_user_id: Optional[int]
-    nama_pendeta: Optional[str]
-    nama_ketua_keuangan: Optional[str]
-    nama_bendahara: Optional[str]
-    initial_jemaat: Optional[str]
-    misi_konferens_id: Optional[int] = None
-    uni_id: Optional[int] = None
-    created_at: Optional[str]
-    updated_at: Optional[str]
+    contact_email: str | None
+    contact_phone: str | None
+    owner_user_id: int | None
+    nama_pendeta: str | None
+    nama_ketua_keuangan: str | None
+    nama_bendahara: str | None
+    initial_jemaat: str | None
+    misi_konferens_id: int | None = None
+    uni_id: int | None = None
+    created_at: str | None
+    updated_at: str | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,7 +84,7 @@ class TenantOut(BaseModel):
 class TenantPublicOut(BaseModel):
     """Public-safe info untuk resolve (no PII)."""
     slug: str
-    subdomain: Optional[str]
+    subdomain: str | None
     nama_uni: str
     nama_kantor_misi: str
     nama_jemaat_lokal: str
@@ -89,32 +94,32 @@ class TenantPublicOut(BaseModel):
 
 class TenantUpdateIn(BaseModel):
     """Update tenant profile (admin uni only)."""
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    subdomain: Optional[str] = None
-    nama_pendeta: Optional[str] = None
-    nama_ketua_keuangan: Optional[str] = None
-    nama_bendahara: Optional[str] = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    subdomain: str | None = None
+    nama_pendeta: str | None = None
+    nama_ketua_keuangan: str | None = None
+    nama_bendahara: str | None = None
 
 
 class StatusChangeIn(BaseModel):
     status: str  # active / suspended / archived
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class PlanChangeIn(BaseModel):
     plan: str  # free / standard / premium
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class TenantsListOut(BaseModel):
-    tenants: List[TenantOut]
+    tenants: list[TenantOut]
     count: int
 
 
 # ===== Helpers =====
 
-def _tenant_to_out(t: Tenant, uni_id: Optional[int] = None) -> TenantOut:
+def _tenant_to_out(t: Tenant, uni_id: int | None = None) -> TenantOut:
     return TenantOut(
         id=t.id,
         slug=t.slug,
@@ -173,7 +178,7 @@ def _audit_admin_change(db: Session, tenant_id: int, actor_id: int, action: str,
 
 # ===== PUBLIC RESOLVE =====
 
-@router.get("/resolve/{identifier}", response_model=TenantPublicOut)
+@router.get("/resolve/{identifier}", tags=['Tenants'], response_model=TenantPublicOut)
 def resolve_tenant(identifier: str, db: Session = Depends(get_db)):
     """
     Public tenant lookup by slug or subdomain.
@@ -188,7 +193,7 @@ def resolve_tenant(identifier: str, db: Session = Depends(get_db)):
 
 # ===== CURRENT USER'S TENANT =====
 
-@router.get("/me", response_model=TenantOut)
+@router.get("/me", tags=['Tenants'], response_model=TenantOut)
 def get_my_tenant(
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
@@ -199,7 +204,7 @@ def get_my_tenant(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant caller tidak ditemukan")
     # Resolve uni_id via MisiKonferens agar frontend bisa langsung query
     # PersentaseConfig scope=UNI tanpa round-trip tambahan.
-    uni_id: Optional[int] = None
+    uni_id: int | None = None
     if t.misi_konferens_id:
         m = db.query(MisiKonferens).filter(MisiKonferens.id == t.misi_konferens_id).first()
         if m:
@@ -209,29 +214,30 @@ def get_my_tenant(
 
 # ===== ADMIN UNI: LIST =====
 
-@router.get("", response_model=TenantsListOut)
+@router.get("", tags=['Tenants'], response_model=TenantsListOut)
 def list_tenants(
     db: Session = Depends(get_db),
-    current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
-    List tenants in caller's uni (ADMIN_UNI only).
-    AUDITOR_MISI: only tenant in their misi.
+    List tenants visible to caller.
+    ADMIN_UNI: semua jemaat di uni caller.
+    AUDITOR_MISI: semua jemaat di misi caller.
+
+    FASE 4 S6-F: gunakan scope.visible_tenant_ids (single source of truth)
+    menggantikan inline `nama_uni == caller_uni.nama_resmi` dan
+    `misi_konferens_id == caller_tenant.misi_konferens_id`.
     """
-    if current["role"] not in ("ADMIN_UNI", "AUDITOR_MISI"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role ini tidak boleh list tenant")
+    if scope.role not in ("ADMIN_UNI", "AUDITOR_MISI"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Role ini tidak boleh list tenant",
+        )
 
-    q = db.query(Tenant)
+    if not scope.visible_tenant_ids:
+        # Caller tidak punya akses ke tenant manapun (e.g. auditor belum terkait misi).
+        return TenantsListOut(tenants=[], count=0)
 
-    if current["role"] == "ADMIN_UNI":
-        uni = _caller_uni(db, current)
-        # Tenants dengan nama_uni = uni ini
-        q = q.filter(Tenant.nama_uni == uni.nama_resmi)
-    else:  # AUDITOR_MISI
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Auditor belum terkait Misi")
-        q = q.filter(Tenant.misi_konferens_id == caller_tenant.misi_konferens_id)
+    q = db.query(Tenant).filter(Tenant.id.in_(scope.visible_tenant_ids))
 
     tenants = q.order_by(Tenant.nama_jemaat_lokal).all()
     return TenantsListOut(
@@ -242,7 +248,7 @@ def list_tenants(
 
 # ===== ADMIN UNI: DETAIL =====
 
-@router.get("/{tenant_id}", response_model=TenantOut)
+@router.get("/{tenant_id}", tags=['Tenants'], response_model=TenantOut)
 def get_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -263,7 +269,7 @@ def get_tenant(
 
 # ===== ADMIN UNI: UPDATE PROFILE =====
 
-@router.patch("/{tenant_id}", response_model=TenantOut)
+@router.patch("/{tenant_id}", tags=['Tenants'], response_model=TenantOut)
 def update_tenant(
     tenant_id: int,
     payload: TenantUpdateIn,
@@ -328,7 +334,7 @@ def update_tenant(
 
 # ===== ADMIN UNI: STATUS CHANGE =====
 
-@router.patch("/{tenant_id}/status", response_model=TenantOut)
+@router.patch("/{tenant_id}/status", tags=['Tenants'], response_model=TenantOut)
 def change_tenant_status(
     tenant_id: int,
     payload: StatusChangeIn,
@@ -373,8 +379,7 @@ def change_tenant_status(
     db.refresh(target)
 
     # T24: Notify ALL users in target tenant about status change
-    from app.models.user import User
-    from app.services.notification_service import create_notification, EventType
+    from app.services.notification_service import EventType, create_notification
 
     affected_users = (
         db.query(User)
@@ -425,7 +430,7 @@ def change_tenant_status(
 
 # ===== ADMIN UNI: PLAN CHANGE =====
 
-@router.patch("/{tenant_id}/plan", response_model=TenantOut)
+@router.patch("/{tenant_id}/plan", tags=['Tenants'], response_model=TenantOut)
 def change_tenant_plan(
     tenant_id: int,
     payload: PlanChangeIn,
@@ -464,18 +469,18 @@ def change_tenant_plan(
 # ===== Branding Schemas (Tahap 21) =====
 
 class BrandingUpdateIn(BaseModel):
-    primary_color: Optional[str] = None
-    secondary_color: Optional[str] = None
-    footer_text: Optional[str] = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    footer_text: str | None = None
 
 
 class BrandingOut(BaseModel):
-    logo_url: Optional[str]
+    logo_url: str | None
     primary_color: str
     secondary_color: str
-    footer_text: Optional[str]
-    branding_updated_at: Optional[str]
-    branding_updated_by: Optional[int]
+    footer_text: str | None
+    branding_updated_at: str | None
+    branding_updated_by: int | None
 
 
 class LogoUploadOut(BaseModel):
@@ -487,7 +492,7 @@ class LogoUploadOut(BaseModel):
 
 # ===== Branding endpoints (Tahap 21) =====
 
-@router.patch("/{tenant_id}/branding", response_model=BrandingOut)
+@router.patch("/{tenant_id}/branding", tags=['Tenants'], response_model=BrandingOut)
 def update_branding_endpoint(
     tenant_id: int,
     payload: BrandingUpdateIn,
@@ -513,12 +518,12 @@ def update_branding_endpoint(
         try:
             _validate_hex_color(payload.primary_color)
         except ValueError as e:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
     if payload.secondary_color is not None:
         try:
             _validate_hex_color(payload.secondary_color)
         except ValueError as e:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
 
     try:
         update_branding(
@@ -529,14 +534,14 @@ def update_branding_endpoint(
             actor_user_id=current["id"],
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
 
     db.commit()
     db.refresh(target)
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.get("/{tenant_id}/branding", response_model=BrandingOut)
+@router.get("/{tenant_id}/branding", tags=['Tenants'], response_model=BrandingOut)
 def get_branding_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -557,7 +562,7 @@ def get_branding_endpoint(
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.post("/{tenant_id}/logo", response_model=LogoUploadOut)
+@router.post("/{tenant_id}/logo", tags=['Tenants'], response_model=LogoUploadOut)
 async def upload_logo_endpoint(
     tenant_id: int,
     file: UploadFile = File(...),
@@ -585,16 +590,22 @@ async def upload_logo_endpoint(
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File kosong")
 
+    # FASE 3-S2.T1 — magic byte validation (mengganti trust terhadap
+    # `file.content_type` yang berasal dari client — bisa di-spoof).
+    detected_mime = validate_logo(content, file.filename)
+    # Pakai detected_mime bukan client-provided untuk konsistensi.
+    safe_content_type = detected_mime
+
     try:
         upload_logo(
             db, target,
             file_content=content,
             filename=file.filename or "logo",
-            content_type=file.content_type or "image/png",
+            content_type=safe_content_type,
             actor_user_id=current["id"],
         )
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
 
     db.commit()
     db.refresh(target)
@@ -606,7 +617,7 @@ async def upload_logo_endpoint(
     )
 
 
-@router.delete("/{tenant_id}/logo", response_model=BrandingOut)
+@router.delete("/{tenant_id}/logo", tags=['Tenants'], response_model=BrandingOut)
 def delete_logo_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),
@@ -642,7 +653,7 @@ def delete_logo_endpoint(
     return BrandingOut(**get_tenant_branding_dict(target))
 
 
-@router.get("/logo/{tenant_id}")
+@router.get("/logo/{tenant_id}", tags=['Tenants'])
 def get_logo_endpoint(
     tenant_id: int,
     db: Session = Depends(get_db),

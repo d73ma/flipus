@@ -21,23 +21,24 @@ Format mengikuti spec:
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm, mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image,
+    Image,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
-from reportlab.pdfgen import canvas
 
-from app.models.transaction import Kuitansi
 from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
 from app.utils.number_to_words import bilang as rupiah_to_words
-
 
 # Tahap 21: branding-aware colors
 DEFAULT_PRIMARY = "#1B4332"   # hijau tua (default green)
@@ -213,11 +214,11 @@ def _build_footer_table(pendeta: str, ketua: str, bendahara: str) -> Table:
 
 
 def generate_mingguan_pdf(
-    kuitansi_list: List[Kuitansi],
+    kuitansi_list: list[Kuitansi],
     tenant: Tenant,
     id_rekap_mingguan: str,
     tanggal_sabat_iso: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> bytes:
     # Tahap 21: tenant branding
     primary_color, secondary_color = _get_tenant_colors(tenant)

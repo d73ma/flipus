@@ -1,16 +1,29 @@
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from jose import jwt, JWTError
-from passlib.context import CryptContext
-from cryptography.fernet import Fernet, InvalidToken
 import hashlib
+import logging
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Header, HTTPException, Request, status as _status
+from cryptography.fernet import Fernet, InvalidToken
+from fastapi import Header, HTTPException, Request
+from fastapi import status as _status
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-fernet = Fernet(settings.PII_ENCRYPTION_KEY.encode())
+# FASE 3-S2.T3 — dual-key Fernet window untuk PII rotation.
+# Encrypt selalu pakai primary key (newest). Decrypt mencoba primary, lalu
+# fallback ke previous (old) kalau ada. Setelah re-encrypt selesai,
+# kosongkan PII_ENCRYPTION_KEY_PREVIOUS.
+_pii_fernet_primary = Fernet(settings.PII_ENCRYPTION_KEY.encode())
+_pii_fernet_previous: Fernet | None = None
+if settings.PII_ENCRYPTION_KEY_PREVIOUS:
+    try:
+        _pii_fernet_previous = Fernet(settings.PII_ENCRYPTION_KEY_PREVIOUS.encode())
+    except (ValueError, TypeError):
+        _pii_fernet_previous = None
 
 
 def utcnow() -> datetime:
@@ -20,7 +33,7 @@ def utcnow() -> datetime:
     Centering the fix here means we change ~20 call sites by editing one line,
     and any future deprecation (e.g. Python 3.16) needs updating only here.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def hash_password(plain: str) -> str:
@@ -32,24 +45,75 @@ def verify_password(plain: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(data: dict, expires_minutes: Optional[int] = None) -> str:
+def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
+    """
+    Issue short-lived access token (default 15 menit, FASE 3-S3.S8).
+
+    Claims yang di-set:
+      - sub, role, tenant_id (atau apapun di `data`)
+      - exp, iat
+      - iss = FLIPUS-UKIKT
+      - watermark = FLIPUS_v1.1
+      - jti (UUID4 hex) untuk blacklist logout
+      - typ = "access" (BUKAN "refresh") — supaya endpoint /refresh bisa
+        reject kalau ada client salah kirim token type.
+    """
     import uuid  # v1.5-A: JWT blacklist butuh JTI unik per token
     to_encode = data.copy()
     # python-jose: 'sub' claim WAJIB string, bukan int.
     if "sub" in to_encode and not isinstance(to_encode["sub"], str):
         to_encode["sub"] = str(to_encode["sub"])
     minutes = expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    expire = datetime.now(UTC) + timedelta(minutes=minutes)
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "iss": "FLIPUS-UKIKT",
         "watermark": "FLIPUS_v1.1",
         "jti": uuid.uuid4().hex,  # v1.5-A: unique token ID untuk blacklist
+        "typ": "access",  # FASE 3-S3.S8: distinguished from refresh
     })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def decode_access_token(token: str) -> Optional[dict]:
+
+def create_refresh_token(data: dict, expires_days: int | None = None) -> str:
+    """
+    Issue long-lived refresh token (default 7 hari, FASE 3-S3.S8).
+
+    Beda dari access token:
+      - typ = "refresh" (supaya endpoint /auth/refresh bisa reject access token
+        yang dikirim sebagai refresh token — itu akan jadi privilege escalation)
+      - exp dalam days, bukan minutes
+      - jti di-random baru (independen dari access token — rotation pattern)
+
+    Refresh token disimpan server-side di tabel RefreshToken (bukan sekadar
+    blacklist). Saat /auth/refresh:
+      1. Decode + verifikasi typ="refresh" dan signature valid
+      2. Cek JTI ada di RefreshToken table (track per-token state)
+      3. Mark old row sebagai `used_at` (one-time use → rotation)
+      4. Issue new access + new refresh
+      5. Simpan new refresh row
+
+    Dengan rotation, kalau refresh token bocor, attacker akan men-invalidate
+    dirinya sendiri saat korban asli melakukan refresh berikutnya.
+    """
+    import uuid
+    to_encode = data.copy()
+    if "sub" in to_encode and not isinstance(to_encode["sub"], str):
+        to_encode["sub"] = str(to_encode["sub"])
+    days = expires_days or settings.REFRESH_TOKEN_EXPIRE_DAYS
+    expire = datetime.now(UTC) + timedelta(days=days)
+    to_encode.update({
+        "exp": expire,
+        "iat": datetime.now(UTC),
+        "iss": "FLIPUS-UKIKT",
+        "watermark": "FLIPUS_v1.1",
+        "jti": uuid.uuid4().hex,
+        "typ": "refresh",  # critical: distinguishes from access token
+    })
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+def decode_access_token(token: str) -> dict | None:
     """
     Decode JWT — support dual-key rotation (T51).
 
@@ -91,13 +155,44 @@ def decode_access_token(token: str) -> Optional[dict]:
     return None
 
 def encrypt_pii(plain_text: str) -> str:
-    return fernet.encrypt(plain_text.encode()).decode()
+    """
+    Encrypt PII dengan primary key. Selalu pakai current key.
+    Untuk re-encrypt ciphertext lama setelah rotasi, lihat utility script
+    `scripts/rotate_pii_to_new_key.py`.
+    """
+    return _pii_fernet_primary.encrypt(plain_text.encode()).decode()
+
 
 def decrypt_pii(token: str) -> str:
-    try:
-        return fernet.decrypt(token.encode()).decode()
-    except InvalidToken:
+    """
+    Decrypt PII dengan dual-key fallback (T3).
+
+    Flow:
+      1. Try decrypt pakai primary key.
+      2. Kalau InvalidToken DAN previous key di-set → try decrypt pakai previous.
+      3. Kalau masih gagal → return "" (safe default, jangan bocor plaintext error).
+
+    Ini mendukung rotasi key tanpa downtime: setelah admin rotate PII key
+    dengan meng-set PII_ENCRYPTION_KEY=new dan PII_ENCRYPTION_KEY_PREVIOUS=old,
+    data lama tetap bisa dibaca sampai re-encryption selesai. Setelah
+    re-encryption selesai, kosongkan PII_ENCRYPTION_KEY_PREVIOUS.
+    """
+    if not token:
         return ""
+    # 1) Primary key
+    try:
+        return _pii_fernet_primary.decrypt(token.encode()).decode()
+    except (InvalidToken, ValueError):
+        pass
+
+    # 2) Previous key fallback
+    if _pii_fernet_previous is not None:
+        try:
+            return _pii_fernet_previous.decrypt(token.encode()).decode()
+        except (InvalidToken, ValueError):
+            pass
+
+    return ""
 
 def generate_tenant_signature(uni: str, kantor_misi: str, jemaat: str) -> str:
     raw = f"{uni}|{kantor_misi}|{jemaat}|{settings.LICENSE_TENANT_SIGNATURE_SALT}"
@@ -106,7 +201,7 @@ def generate_tenant_signature(uni: str, kantor_misi: str, jemaat: str) -> str:
 
 def require_admin_bootstrap_dependency(
     request: Request,
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     FastAPI dependency: header `X-Admin-Token` harus cocok dengan
@@ -141,7 +236,7 @@ def require_admin_bootstrap_dependency(
             db.commit()
             db.close()
         except Exception:
-            pass
+            logger.exception("db.commit/close gagal saat verify admin token")
         raise HTTPException(
             status_code=_status.HTTP_401_UNAUTHORIZED,
             detail="X-Admin-Token tidak valid atau tidak diberikan",
@@ -158,6 +253,6 @@ def require_admin_bootstrap_dependency(
         db.commit()
         db.close()
     except Exception:
-        pass
+        logger.exception("db.commit/close gagal saat admin-token verification")
 
     return True

@@ -36,11 +36,11 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from app.core.database import SessionLocal, engine, Base
-from app.models.tenant import Tenant
-from app.models.user import User
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-from app.core.security import hash_password, generate_tenant_signature
+from app.core.database import Base, SessionLocal, engine  # noqa: E402
+from app.core.security import generate_tenant_signature, hash_password  # noqa: E402
+from app.models.master import MisiKonferens, PersentaseConfig, Uni  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 # T32: Default branding per jemaat (placeholder untuk demo)
 DEFAULT_BRANDING = {

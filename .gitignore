@@ -13,6 +13,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv.broken314/
 venv/
 ENV/
 env/
@@ -24,6 +25,7 @@ env/
 *.db-journal
 flipus_local.db
 flipus_local.db-journal
+flipus_local.db.bak.*
 postgres_data/
 *.sql.gz
 
@@ -69,3 +71,21 @@ node_modules/
 
 # Audit logs (may contain sensitive PII traceability)
 storage/audit-dumps/
+
+# Type-check / lint caches (FASE 3 Sprint 4)
+.mypy_cache/
+.ruff_cache/
+
+# FASE 5 Sprint 4 — temp scripts & backups from ruff sweep iterations.
+# Kept locally for debugging; never tracked.
+.tmp_ruff/
+.tmp_ruff/**/
+.ruff_e402_fix.py
+
+# FASE 5 Sprint 6 — Tenant branding uploads (testing artifacts).
+# These are uploaded via /settings/branding for white-label per tenant.
+# Real production uploads should NOT be tracked — only DB rows matter.
+storage/tenants/*/logo_*.png
+storage/tenants/*/logo_*.svg
+storage/tenants/*/logo_*.jpg
+storage/tenants/*/logo_*.jpeg

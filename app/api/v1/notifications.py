@@ -16,17 +16,15 @@ All endpoints require authentication and scope to current user_id.
 from __future__ import annotations
 
 from datetime import datetime
-from app.core.security import utcnow
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+from app.core.security import utcnow
 from app.models.notification import Notification
-from app.models.user import User
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -39,12 +37,12 @@ class NotificationOut(BaseModel):
     title: str
     message: str
     icon: str
-    link: Optional[str] = None
-    related_entity_type: Optional[str] = None
-    related_entity_id: Optional[str] = None
+    link: str | None = None
+    related_entity_type: str | None = None
+    related_entity_id: str | None = None
     is_read: bool
     created_at: datetime
-    read_at: Optional[datetime] = None
+    read_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,7 +61,7 @@ class UnreadCountOut(BaseModel):
 
 # ===== Endpoints =====
 
-@router.get("", response_model=NotificationListOut)
+@router.get("", tags=['Notifications'], response_model=NotificationListOut)
 def list_notifications(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -102,7 +100,7 @@ def list_notifications(
     )
 
 
-@router.get("/unread-count", response_model=UnreadCountOut)
+@router.get("/unread-count", tags=['Notifications'], response_model=UnreadCountOut)
 def get_unread_count(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -116,7 +114,7 @@ def get_unread_count(
     return UnreadCountOut(unread_count=count)
 
 
-@router.post("/{notification_id}/read", response_model=NotificationOut)
+@router.post("/{notification_id}/read", tags=['Notifications'], response_model=NotificationOut)
 def mark_as_read(
     notification_id: int,
     current_user: dict = Depends(get_current_user),
@@ -140,7 +138,7 @@ def mark_as_read(
     return NotificationOut.model_validate(notif)
 
 
-@router.post("/read-all")
+@router.post("/read-all", tags=['Notifications'])
 def mark_all_as_read(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -156,7 +154,7 @@ def mark_all_as_read(
     return {"marked_read": updated}
 
 
-@router.delete("/{notification_id}")
+@router.delete("/{notification_id}", tags=['Notifications'])
 def delete_notification(
     notification_id: int,
     current_user: dict = Depends(get_current_user),
@@ -176,7 +174,7 @@ def delete_notification(
     return {"deleted": True, "id": notification_id}
 
 
-@router.delete("/clear-all")
+@router.delete("/clear-all", tags=['Notifications'])
 def clear_read_notifications(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),

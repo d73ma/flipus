@@ -1,4 +1,5 @@
 """
+
 FLIPUS v1.1 — Dashboard helper endpoints + Kuitansi submit.
 
 Endpoint:
@@ -7,25 +8,31 @@ Endpoint:
               + auto-thanks WA kalau ada nomor (non-blocking)
 """
 
+
+import logging
 from datetime import datetime
-from app.core.security import utcnow
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.core.security import encrypt_pii, decrypt_pii
 from app.api.v1.auth import get_current_user
-from app.utils.sabat_counter import get_current_sabat, get_sabat_info, get_effective_sabat_for_input
-from app.utils.nomor_kuitansi import generate_nomor_kuitansi, generate_id_rekap_mingguan
-from app.utils.number_to_words import terbilang
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
+from app.core.database import get_db
+from app.core.security import decrypt_pii, encrypt_pii, utcnow
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.audit import AuditLog
 from app.models.master import PersentaseConfig
-from app.services.notification_service import create_notification, EventType
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.services.notification_service import EventType, create_notification
+from app.utils.nomor_kuitansi import generate_id_rekap_mingguan, generate_nomor_kuitansi
+from app.utils.number_to_words import terbilang
+from app.utils.sabat_counter import get_current_sabat, get_effective_sabat_for_input, get_sabat_info
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -37,7 +44,7 @@ class SabatInfoOut(BaseModel):
     tahun: int
 
 
-@router.get("/sabat-info", response_model=SabatInfoOut)
+@router.get("/sabat-info", tags=['Dashboard'], response_model=SabatInfoOut)
 def sabat_info(
     date: str = None,
     current_user: dict = Depends(get_current_user),
@@ -56,14 +63,14 @@ def sabat_info(
 
 class KuitansiIn(BaseModel):
     """Schema untuk Bendahara create kuitansi (manual atau dari OCR)."""
-    nama_umat: Optional[str] = Field(None, description="Nama pemberi (optional, akan dienkripsi)")
-    nomor_whatsapp: Optional[str] = Field(None, description="WA pemberi (optional, akan dienkripsi + auto-thanks)")
+    nama_umat: str | None = Field(None, description="Nama pemberi (optional, akan dienkripsi)")
+    nomor_whatsapp: str | None = Field(None, description="WA pemberi (optional, akan dienkripsi + auto-thanks)")
     perpuluhan_x_angka: int = Field(default=0, ge=0)
     pt_angka: int = Field(default=0, ge=0)
     khusus_angka: int = Field(default=0, ge=0)
-    tanggal_sabat: Optional[str] = Field(None, description="ISO date, default = sabat-info terbaru")
-    id_rekap_mingguan: Optional[str] = Field(None, description="default auto-generated")
-    foto_amplop_path: Optional[str] = None
+    tanggal_sabat: str | None = Field(None, description="ISO date, default = sabat-info terbaru")
+    id_rekap_mingguan: str | None = Field(None, description="default auto-generated")
+    foto_amplop_path: str | None = None
 
 
 class KuitansiOut(BaseModel):
@@ -84,17 +91,35 @@ class KuitansiOut(BaseModel):
     status: str = "finalized"
     needs_approval: bool = False  # True kalau draft, butuh Ketua approval
     auto_thanks_sent: bool = False
-    auto_thanks_target: Optional[str] = None
+    auto_thanks_target: str | None = None
 
 
 def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
-    """Ambil PersentaseConfig (MISI) untuk tenant ini. Default fallback."""
+    """Ambil PersentaseConfig (MISI) untuk tenant ini. Default fallback.
+
+    FASE 3-S2 regression fix: harus return 6 keys (Jerry Model B 3-tier):
+        pct_x_jemaat, pct_pt_jemaat, pct_khusus_jemaat  (Auditor Misi set)
+        pct_x_uni, pct_pt_uni, pct_khusus_uni            (Admin Uni set)
+
+    Sebelumnya hanya 3 keys jemaat — menyebabkan KeyError 'pct_x_uni'
+    di create_kuitansi (dashboard.py:192). Bug ini lolos dari FASE 2 S2/R1
+    karena test_accounting_integrity tidak exercise create_kuitansi endpoint.
+
+    Behavior:
+    - kalau tenant.misi_konferens_id None (admin/auditor placeholder) →
+      fallback SDA doctrine default (uni=0)
+    - kalau PersentaseConfig MISI tidak ditemukan → fallback sama
+    - kalau ada → pakai 6 field dari row
+    """
     if tenant.misi_konferens_id is None:
         # Tenant placeholder (admin/auditor), no config
         return {
             "pct_x_jemaat": 1.0,
             "pct_pt_jemaat": 0.5,
             "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.0,
+            "pct_pt_uni": 0.0,
+            "pct_khusus_uni": 0.0,
         }
     cfg = (
         db.query(PersentaseConfig)
@@ -107,11 +132,21 @@ def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
             "pct_x_jemaat": cfg.pct_x_jemaat,
             "pct_pt_jemaat": cfg.pct_pt_jemaat,
             "pct_khusus_jemaat": cfg.pct_khusus_jemaat,
+            "pct_x_uni": cfg.pct_x_uni,
+            "pct_pt_uni": cfg.pct_pt_uni,
+            "pct_khusus_uni": cfg.pct_khusus_uni,
         }
-    return {"pct_x_jemaat": 1.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0}
+    return {
+        "pct_x_jemaat": 1.0,
+        "pct_pt_jemaat": 0.5,
+        "pct_khusus_jemaat": 0.0,
+        "pct_x_uni": 0.0,
+        "pct_pt_uni": 0.0,
+        "pct_khusus_uni": 0.0,
+    }
 
 
-@router.post("/kuitansi", response_model=KuitansiOut)
+@router.post("/kuitansi", tags=['Dashboard'], response_model=KuitansiOut)
 def create_kuitansi(
     payload: KuitansiIn,
     db: Session = Depends(get_db),
@@ -158,7 +193,7 @@ def create_kuitansi(
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == tenant.id)
         .filter(Kuitansi.tanggal_sabat == tanggal_sabat)
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .count()
     )
     urutan = existing_count + 1
@@ -172,21 +207,41 @@ def create_kuitansi(
         # Fallback kalau format gagal
         nomor_kuitansi = f"KPT-{utcnow().strftime('%Y%m%d%H%M%S')}-{urutan}"
 
-    # Hitung porsi
+    # Hitung porsi — FASE 2 S2/R1: pakai Jerry Model B (compute_porsi)
+    # Single source of truth — semua call site harus pakai fungsi ini.
     pct = _get_persentase_for_tenant(db, tenant)
     total_x = payload.perpuluhan_x_angka
     total_pt = payload.pt_angka
     total_khusus = payload.khusus_angka
     total_pemberian = total_x + total_pt + total_khusus
 
-    porsi_x_misi = int(total_x * pct["pct_x_jemaat"])
-    porsi_pt_misi = int(total_pt * pct["pct_pt_jemaat"])
-    porsi_pt_jemaat = total_pt - porsi_pt_misi
-    porsi_khusus_misi = int(total_khusus * pct["pct_khusus_jemaat"])
-    porsi_khusus_jemaat = total_khusus - porsi_khusus_misi
+    from app.utils.porsi_calculator import compute_porsi
 
-    porsi_kantor_misi = porsi_x_misi + porsi_pt_misi
-    porsi_kas_jemaat = porsi_pt_jemaat + porsi_khusus_jemaat
+    _porsi = compute_porsi(
+        x=total_x,
+        pt=total_pt,
+        kh=total_khusus,
+        pct_x_jemaat=pct["pct_x_jemaat"],
+        pct_pt_jemaat=pct["pct_pt_jemaat"],
+        pct_khusus_jemaat=pct["pct_khusus_jemaat"],
+        pct_x_uni=pct["pct_x_uni"],
+        pct_pt_uni=pct["pct_pt_uni"],
+        pct_khusus_uni=pct["pct_khusus_uni"],
+    )
+
+    # Field yang disimpan di Kuitansi (4 kolom existing):
+    #   porsi_kantor_misi  = total ke Misi (X + PT + KH ke Misi)
+    #   porsi_kas_jemaat   = total ke Jemaat (X + PT + KH ke Jemaat)
+    #   porsi_khusus_misi  = porsi KH yg ke Misi
+    #   porsi_khusus_jemaat= porsi KH yg ke Jemaat
+    porsi_kantor_misi = _porsi["pm_x"] + _porsi["pm_pt"] + _porsi["pm_kh"]
+    porsi_kas_jemaat = _porsi["pj_x"] + _porsi["pj_pt"] + _porsi["pj_kh"]
+    porsi_khusus_misi = _porsi["pm_kh"]
+    porsi_khusus_jemaat = _porsi["pj_kh"]
+    # porsi_uni tidak disimpan di model Kuitansi existing — FASE 2 S5/R4 akan tambah kolom
+    porsi_x_uni = _porsi["pu_x"]
+    porsi_pt_uni = _porsi["pu_pt"]
+    porsi_khusus_uni = _porsi["pu_kh"]
 
     # Encrypt PII
     nama_encrypted = encrypt_pii(payload.nama_umat) if payload.nama_umat else None
@@ -210,6 +265,10 @@ def create_kuitansi(
         porsi_kas_jemaat=porsi_kas_jemaat,
         porsi_khusus_misi=porsi_khusus_misi,
         porsi_khusus_jemaat=porsi_khusus_jemaat,
+        # FASE 2 S5/R4: simpan porsi Uni untuk auditability
+        porsi_x_uni=porsi_x_uni,
+        porsi_pt_uni=porsi_pt_uni,
+        porsi_khusus_uni=porsi_khusus_uni,
         # T23-1: Approval workflow
         status=initial_status,
         created_by_user_id=current_user["id"],
@@ -239,7 +298,7 @@ def create_kuitansi(
             auto_thanks_sent = isinstance(resp, dict) and resp.get("status") == "sent"
         except Exception:
             # Silent fail — audit log only
-            pass
+            logger.exception("send_auto_thanks gagal (auto-thanks), audit log only")
 
     # Audit log
     db.add(AuditLog(
@@ -265,7 +324,7 @@ def create_kuitansi(
                 user_id=ketua.id,
                 tenant_id=tenant.id,
                 event_type=EventType.KUITANSI_DRAFT_CREATED,
-                title=f"Kuitansi baru menunggu approval",
+                title="Kuitansi baru menunggu approval",
                 message=f"Bendahara membuat draft kuitansi {nomor_kuitansi} (Rp {total_pemberian:,}) untuk {tanggal_sabat}",
                 link="/ketua",
                 related_entity_type="kuitansi",
@@ -306,19 +365,19 @@ def create_kuitansi(
 
 class ApprovalActionIn(BaseModel):
     """Schema untuk approve/reject."""
-    reason: Optional[str] = Field(None, max_length=500, description="Required untuk reject")
+    reason: str | None = Field(None, max_length=500, description="Required untuk reject")
 
 
 class KuitansiApprovalOut(BaseModel):
     id: int
     nomor_kuitansi: str
     status: str
-    approved_by_user_id: Optional[int] = None
-    approved_at: Optional[str] = None
-    rejected_by_user_id: Optional[int] = None
-    rejected_at: Optional[str] = None
-    rejected_reason: Optional[str] = None
-    created_by_user_id: Optional[int] = None
+    approved_by_user_id: int | None = None
+    approved_at: str | None = None
+    rejected_by_user_id: int | None = None
+    rejected_at: str | None = None
+    rejected_reason: str | None = None
+    created_by_user_id: int | None = None
     total_pemberian_angka: int
     tanggal_sabat: str
 
@@ -328,7 +387,7 @@ class PendingListOut(BaseModel):
     total: int
 
 
-@router.post("/kuitansi/{kuitansi_id}/approve", response_model=KuitansiApprovalOut)
+@router.post("/kuitansi/{kuitansi_id}/approve", tags=['Dashboard'], response_model=KuitansiApprovalOut)
 def approve_kuitansi(
     kuitansi_id: int,
     db: Session = Depends(get_db),
@@ -398,7 +457,7 @@ def approve_kuitansi(
             )
         except Exception:
             # Silent fail — audit log only
-            pass
+            logger.exception("send_auto_thanks gagal (notif), audit log only")
 
     # Audit log
     db.add(AuditLog(
@@ -428,8 +487,9 @@ def approve_kuitansi(
             commit=False,
         )
         # Also notify all ADMIN_UNI in the same uni
+        from app.models.master import MisiKonferens, Uni
         from app.models.user import User
-        from app.models.master import Uni, MisiKonferens
+
         k_tenant_for_admin = db.query(Tenant).filter(Tenant.id == k.tenant_id).first()
         if k_tenant_for_admin and k_tenant_for_admin.nama_uni:
             uni = db.query(Uni).filter(Uni.nama_resmi == k_tenant_for_admin.nama_uni).first()
@@ -472,7 +532,7 @@ def approve_kuitansi(
     )
 
 
-@router.post("/kuitansi/{kuitansi_id}/reject", response_model=KuitansiApprovalOut)
+@router.post("/kuitansi/{kuitansi_id}/reject", tags=['Dashboard'], response_model=KuitansiApprovalOut)
 def reject_kuitansi(
     kuitansi_id: int,
     payload: ApprovalActionIn,
@@ -570,49 +630,32 @@ def reject_kuitansi(
     )
 
 
-@router.get("/kuitansi/pending", response_model=PendingListOut)
+@router.get("/kuitansi/pending", tags=['Dashboard'], response_model=PendingListOut)
 def list_pending_kuitansi(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     List kuitansi yang menunggu approval (status='draft').
 
-    - KETUA_KEUANGAN: jemaat sendiri
-    - ADMIN_UNI: semua jemaat di uni
+    FASE4-S6C: pakai TenantScope — single source of truth (gantikan inline
+    role-branch yang duplikat logika resolve_tenant_scope).
+
+    Scope otomatis dari role caller:
+    - BENDAHARA / KETUA_KEUANGAN: own tenant
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
+    - PENDETA / AUDITOR_MISI: tidak eligible
     """
-    if current_user["role"] not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
+    if scope.role not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak eligible")
 
-    # Scope tenant IDs
-    if current_user["role"] == "BENDAHARA":
-        # Bendahara: lihat draft miliknya sendiri (untuk koreksi)
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
-    elif current_user["role"] == "KETUA_KEUANGAN":
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
-    else:  # ADMIN_UNI
-        from app.models.master import Uni, MisiKonferens
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.nama_uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Uni tidak terdefinisi")
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Uni not found")
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id.in_(misi_ids)).all()]
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id.in_(tenant_ids),
-            Kuitansi.status == "draft",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.created_at.desc())
+    q = (
+        db.query(Kuitansi)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(Kuitansi.status == "draft")
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
+        .order_by(Kuitansi.created_at.desc())
+    )
 
     rows = q.all()
 
@@ -635,42 +678,31 @@ def list_pending_kuitansi(
     return PendingListOut(items=items, total=len(items))
 
 
-@router.get("/kuitansi/rejected")
+@router.get("/kuitansi/rejected", tags=['Dashboard'])
 def list_rejected_kuitansi(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     List kuitansi yang di-reject (untuk Bendahara lihat & koreksi).
 
-    - BENDAHARA: jemaat sendiri
-    - KETUA_KEUANGAN: jemaat sendiri
-    - ADMIN_UNI: semua jemaat di uni
+    FASE4-S6C: pakai TenantScope — single source of truth.
+
+    Scope otomatis dari role caller:
+    - BENDAHARA / KETUA_KEUANGAN: own tenant
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
+    - PENDETA / AUDITOR_MISI: tidak eligible
     """
-    if current_user["role"] not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
+    if scope.role not in ("KETUA_KEUANGAN", "ADMIN_UNI", "BENDAHARA"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak eligible")
 
-    if current_user["role"] in ("BENDAHARA", "KETUA_KEUANGAN"):
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id == current_user["tenant_id"],
-            Kuitansi.status == "rejected",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.rejected_at.desc())
-    else:
-        from app.models.master import Uni, MisiKonferens
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
-        if not caller_tenant or not caller_tenant.nama_uni:
-            return {"items": [], "total": 0}
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            return {"items": [], "total": 0}
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id.in_(misi_ids)).all()]
-        q = db.query(Kuitansi).filter(
-            Kuitansi.tenant_id.in_(tenant_ids),
-            Kuitansi.status == "rejected",
-            Kuitansi.is_purged == False,
-        ).order_by(Kuitansi.rejected_at.desc())
+    q = (
+        db.query(Kuitansi)
+        .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(Kuitansi.status == "rejected")
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
+        .order_by(Kuitansi.rejected_at.desc())
+    )
 
     rows = q.all()
 

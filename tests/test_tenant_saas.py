@@ -16,12 +16,6 @@ Run dengan:
 """
 
 import os
-import sys
-import pytest
-from datetime import datetime, timedelta
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
 
 # Set test env sebelum import app
 os.environ["DATABASE_URL_LOCAL"] = "sqlite:///./test_flipus_t20.db"
@@ -29,14 +23,11 @@ os.environ["SECRET_KEY"] = "test-secret-key-t20-do-not-use-in-prod"
 os.environ["PII_ENCRYPTION_KEY"] = "k7XQz9pV3mR2nT8sW1yA4bC6dE5fG0hI="
 os.environ["LICENSE_TENANT_SIGNATURE_SALT"] = "test-salt-t20"
 
-from app.main import app
-from app.core.database import Base, get_db
-from app.core.security import hash_password, generate_tenant_signature
+from app.core.security import generate_tenant_signature, hash_password
+from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, Uni
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.master import Uni, MisiKonferens
-from app.models.audit import AuditLog
-
 
 # ===== Test DB setup removed — pakai conftest.py =====
 
@@ -240,11 +231,27 @@ class TestTenantAdminEndpoints:
     """ADMIN_UNI can list/update tenant status/plan."""
 
     def _setup_admin_uni(self, db):
-        """Create Uni + Admin Uni user + 2 tenants."""
+        """Create Uni + Misi + Admin Uni user + 2 tenants.
+
+        FASE 4 S6-F: tambah MisiKonferens chain agar TenantScope untuk ADMIN_UNI
+        bisa resolve visible_tenant_ids via Uni → MisiKonferens → Tenant.
+        Tanpa misi record, `visible_tenant_ids` = [] → 403.
+        """
         uni = Uni(nama_resmi="UKIKT", kode="UKIKT")
         db.add(uni)
         db.commit()
         db.refresh(uni)
+
+        # Misi placeholder (chain Uni → Misi → Tenant untuk TenantScope)
+        misi = MisiKonferens(
+            uni_id=uni.id,
+            nama_resmi="Daerah Konferens Minahasa",
+            kode="DKMI",
+            jenis="MISI",
+        )
+        db.add(misi)
+        db.commit()
+        db.refresh(misi)
 
         # Admin placeholder tenant
         admin_tenant = Tenant(
@@ -270,9 +277,15 @@ class TestTenantAdminEndpoints:
         db.add(admin)
         db.commit()
 
-        # 2 jemaat tenants
+        # 2 jemaat tenants (attach ke misi via misi_konferens_id)
         t_a = _create_tenant(db, "nataan", "Jemaat Nataan", uni="UKIKT")
+        t_a.misi_konferens_id = misi.id
+        db.commit()
+        db.refresh(t_a)
         t_b = _create_tenant(db, "tombatu", "Jemaat Tombatu", uni="UKIKT")
+        t_b.misi_konferens_id = misi.id
+        db.commit()
+        db.refresh(t_b)
 
         return admin_tenant, admin, t_a, t_b
 

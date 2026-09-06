@@ -75,5 +75,6 @@ def terbilang(angka: int) -> str:
     return _format_besar(abs(angka)).replace("  ", " ").strip() + " Rupiah"
 
 
-# Alias — legacy callers from earlier Tahap used 'bilang' shorthand
+# Alias — legacy callers from earlier Tahap used various names
 bilang = terbilang
+rupiah_to_words = terbilang  # S4-D.R1: unify naming across kuitansi.py / whatsapp.py / pdf_generator.py

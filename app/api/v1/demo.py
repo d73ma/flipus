@@ -15,16 +15,15 @@ Demo token:
 Untuk production: disable endpoint ini via env var DEMO_MODE_ENABLED=false
 """
 import os
-from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import create_access_token
-from app.models.user import User
 from app.models.tenant import Tenant
+from app.models.user import User
 
 router = APIRouter()
 
@@ -54,10 +53,10 @@ def _is_demo_enabled() -> bool:
     return os.getenv("DEMO_MODE_ENABLED", "true").lower() == "true"
 
 
-@router.get("/login-as/{role}", response_model=DemoLoginOut)
+@router.get("/login-as/{role}", tags=['Demo'], response_model=DemoLoginOut)
 def demo_login_as(
     role: str,
-    tenant_slug: Optional[str] = Query(
+    tenant_slug: str | None = Query(
         None,
         description="Pilih jemaat via slug (mis. nataan-ratahan, sentrum-minahasa). "
                     "Kalau kosong, pakai jemaat default (Nataan).",
@@ -166,7 +165,7 @@ def demo_login_as(
     )
 
 
-@router.get("/info")
+@router.get("/info", tags=['Demo'])
 def demo_info():
     """Info mode demo (untuk landing page banner)."""
     return {
@@ -190,7 +189,7 @@ class TenantBrandingPreview(BaseModel):
     demo_user_count: int  # berapa user demo di jemaat ini
 
 
-@router.get("/tenants", response_model=List[TenantBrandingPreview])
+@router.get("/tenants", tags=['Demo'], response_model=list[TenantBrandingPreview])
 def demo_list_tenants(db: Session = Depends(get_db)):
     """
     List jemaat dengan branding preview (untuk landing page).
@@ -205,7 +204,7 @@ def demo_list_tenants(db: Session = Depends(get_db)):
         .order_by(Tenant.id)
         .all()
     )
-    out: List[TenantBrandingPreview] = []
+    out: list[TenantBrandingPreview] = []
     for t in tenants:
         demo_user_count = (
             db.query(User)

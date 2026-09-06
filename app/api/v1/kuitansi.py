@@ -1,4 +1,5 @@
 """
+
 FLIPUS v1.3 — Kuitansi search + export endpoint (Tahap 22).
 
 Endpoint:
@@ -20,24 +21,36 @@ RBAC:
 - ADMIN_UNI: all jemaat in uni
 """
 
+
 import csv
 import io
-from datetime import datetime
-from typing import Optional, List
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func
 
-from app.core.database import get_db
+if TYPE_CHECKING:  # S4-D.R1: import InstrumentedAttribute only untuk mypy (runtime overhead = 0)
+    from sqlalchemy.orm.attributes import InstrumentedAttribute
+
+import logging
+
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.security import decrypt_pii
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni
+from app.core.tenant_scope import TenantScope, require_tenant_scope
 from app.models.audit import AuditLog
+from app.models.master import PersentaseConfig
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+
+# FASE 2 S6/R5: recompute single pakai Jerry Model B (single source of truth).
+from app.utils.porsi_calculator import compute_porsi
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -49,8 +62,8 @@ class KuitansiListItem(BaseModel):
     nomor_kuitansi: str
     id_rekap_mingguan: str
     tanggal_sabat: str
-    nama_umat: Optional[str] = None  # decrypted
-    nomor_whatsapp: Optional[str] = None  # decrypted
+    nama_umat: str | None = None  # decrypted
+    nomor_whatsapp: str | None = None  # decrypted
     perpuluhan_x_angka: int
     pt_angka: int
     khusus_angka: int
@@ -58,13 +71,13 @@ class KuitansiListItem(BaseModel):
     porsi_kantor_misi: int
     porsi_kas_jemaat: int
     tenant_id: int
-    nama_jemaat: Optional[str] = None
+    nama_jemaat: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class KuitansiSearchOut(BaseModel):
-    items: List[KuitansiListItem]
+    items: list[KuitansiListItem]
     total: int
     page: int
     per_page: int
@@ -78,8 +91,8 @@ class FilterMetaOut(BaseModel):
     total_pt: int
     total_khusus: int
     total_pemberian: int
-    date_range_from: Optional[str]
-    date_range_to: Optional[str]
+    date_range_from: str | None
+    date_range_to: str | None
 
 
 # ===== Helpers =====
@@ -141,51 +154,21 @@ def _decrypt_kuitansi_fields(k: Kuitansi, db: Session = None, current: dict = No
             try:
                 db.rollback()
             except Exception:
-                pass
+                logger.exception("db.rollback() gagal saat audit-failure cleanup")
 
     return {"nama_umat": nama_umat, "nomor_whatsapp": nomor_wa}
 
 
-def _get_visible_tenant_ids(db: Session, current: dict) -> List[int]:
-    """Return list of tenant IDs visible to caller."""
-    role = current["role"]
-    caller_tenant = db.query(Tenant).filter(Tenant.id == current["tenant_id"]).first()
-
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        return [caller_tenant.id] if caller_tenant else []
-
-    if role == "AUDITOR_MISI":
-        if not caller_tenant or not caller_tenant.misi_konferens_id:
-            return []
-        return [t.id for t in db.query(Tenant).filter(
-            Tenant.misi_konferens_id == caller_tenant.misi_konferens_id
-        ).all()]
-
-    if role == "ADMIN_UNI":
-        if not caller_tenant or not caller_tenant.nama_uni:
-            return []
-        uni = db.query(Uni).filter(Uni.nama_resmi == caller_tenant.nama_uni).first()
-        if not uni:
-            return []
-        # Semua misi di uni tsb
-        misi_ids = [m.id for m in db.query(MisiKonferens).filter(MisiKonferens.uni_id == uni.id).all()]
-        return [t.id for t in db.query(Tenant).filter(
-            Tenant.misi_konferens_id.in_(misi_ids)
-        ).all()]
-
-    return []
-
-
 def _build_filters(
     db: Session,
-    visible_tenant_ids: List[int],
-    date_from: Optional[str],
-    date_to: Optional[str],
-    tipe: Optional[str],
-    nominal_min: Optional[int],
-    nominal_max: Optional[int],
-    id_rekap: Optional[str],
-    nama: Optional[str],
+    visible_tenant_ids: list[int],
+    date_from: str | None,
+    date_to: str | None,
+    tipe: str | None,
+    nominal_min: int | None,
+    nominal_max: int | None,
+    id_rekap: str | None,
+    nama: str | None,
 ):
     """Build SQLAlchemy filter conditions."""
     filters = []
@@ -197,7 +180,7 @@ def _build_filters(
         filters.append(Kuitansi.tenant_id.in_(visible_tenant_ids))
 
     # Purged excluded
-    filters.append(Kuitansi.is_purged == False)
+    filters.append(Kuitansi.is_purged == False)  # noqa: E712
 
     # Date range
     if date_from:
@@ -249,7 +232,7 @@ def _build_filters(
     return filters, nama
 
 
-def _apply_nama_filter(db: Session, q, nama: Optional[str]):
+def _apply_nama_filter(db: Session, q, nama: str | None):
     """Filter by nama (LIKE, decrypt-then-match)."""
     if not nama:
         return q
@@ -266,7 +249,7 @@ def _apply_nama_filter(db: Session, q, nama: Optional[str]):
                 if nama_dec and nama_lower in nama_dec.lower():
                     matching_ids.append(k.id)
             except Exception:
-                pass
+                logger.exception("decrypt_pii gagal saat filter nama")
     if not matching_ids:
         return q.filter(Kuitansi.id == -1)  # empty
     return q.filter(Kuitansi.id.in_(matching_ids))
@@ -284,28 +267,32 @@ def _is_valid_iso_date(s: str) -> bool:
 
 # ===== Endpoints =====
 
-@router.get("/search", response_model=KuitansiSearchOut)
+@router.get("/search", tags=['Kuitansi'], response_model=KuitansiSearchOut)
 def search_kuitansi(
-    date_from: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
-    date_to: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
-    tipe: Optional[str] = Query(None, description="x|pt|khusus|x_pt|all_has_value|kosong"),
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),  # T23-1: default finalized
-    nominal_min: Optional[int] = Query(None, ge=0),
-    nominal_max: Optional[int] = Query(None, ge=0),
-    id_rekap: Optional[str] = Query(None),
-    nama: Optional[str] = Query(None, description="LIKE search (decrypt-then-match)"),
+    date_from: str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to: str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    tipe: str | None = Query(None, description="x|pt|khusus|x_pt|all_has_value|kosong"),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),  # T23-1: default finalized
+    nominal_min: int | None = Query(None, ge=0),
+    nominal_max: int | None = Query(None, ge=0),
+    id_rekap: str | None = Query(None),
+    nama: str | None = Query(None, description="LIKE search (decrypt-then-match)"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     sort_by: str = Query("tanggal_sabat", description="tanggal_sabat|nominal|created_at"),
     sort_order: str = Query("desc", description="asc|desc"),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Advanced search kuitansi dengan multiple filters.
 
     T23-1: Default status_filter='finalized' (hanya approved).
     Gunakan status_filter='all' untuk lihat draft juga (Bendahara/Auditor).
+
+    FASE4-S5B: Pakai require_tenant_scope dependency — cross-tenant isolation
+    otomatis dari app.core.tenant_scope (single source of truth).
 
     Returns:
         items: list of matching kuitansi (decrypted)
@@ -315,7 +302,7 @@ def search_kuitansi(
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
 
     # Build base query
     filters, _ = _build_filters(
@@ -335,8 +322,8 @@ def search_kuitansi(
     # Count before pagination
     total = q.count()
 
-    # Sort
-    sort_col = {
+    # Sort — type hint only (import ada di top-of-file TYPE_CHECKING)
+    sort_col: InstrumentedAttribute = {
         "tanggal_sabat": Kuitansi.tanggal_sabat,
         "nominal": Kuitansi.total_pemberian_angka,
         "created_at": Kuitansi.created_at,
@@ -393,17 +380,22 @@ def search_kuitansi(
     )
 
 
-@router.get("/filter-meta", response_model=FilterMetaOut)
+@router.get("/filter-meta", tags=['Kuitansi'], response_model=FilterMetaOut)
 def filter_meta(
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
-    """Return aggregate stats untuk current filter context. Useful untuk chart awal."""
+    """Return aggregate stats untuk current filter context. Useful untuk chart awal.
+
+    FASE4-S5B: require_tenant_scope guarantees non-empty visible_tenant_ids
+    (403 raised upstream jika scope kosong).
+    """
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
     if not visible_tenant_ids:
         return FilterMetaOut(
             total_kuitansi=0, total_x=0, total_pt=0, total_khusus=0,
@@ -412,7 +404,7 @@ def filter_meta(
 
     q = db.query(Kuitansi).filter(
         Kuitansi.tenant_id.in_(visible_tenant_ids),
-        Kuitansi.is_purged == False,
+        Kuitansi.is_purged == False,  # noqa: E712)
     )
     if status_filter != "all":
         q = q.filter(Kuitansi.status == status_filter)
@@ -426,6 +418,11 @@ def filter_meta(
         func.min(Kuitansi.tanggal_sabat).label("min_date"),
         func.max(Kuitansi.tanggal_sabat).label("max_date"),
     ).first()
+    if agg is None:
+        return FilterMetaOut(
+            total_kuitansi=0, total_x=0, total_pt=0, total_khusus=0,
+            total_pemberian=0, date_range_from=None, date_range_to=None,
+        )  # S4-D.R1: handle empty result for mypy + safety
 
     return FilterMetaOut(
         total_kuitansi=agg.total,
@@ -440,18 +437,19 @@ def filter_meta(
 
 # ===== Export =====
 
-@router.get("/export")
+@router.get("/export", tags=['Kuitansi'])
 def export_kuitansi(
     format: str = Query("csv", description="csv|xlsx|pdf"),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    tipe: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
-    nominal_min: Optional[int] = Query(None),
-    nominal_max: Optional[int] = Query(None),
-    id_rekap: Optional[str] = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    tipe: str | None = Query(None),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
+    nominal_min: int | None = Query(None),
+    nominal_max: int | None = Query(None),
+    id_rekap: str | None = Query(None),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Export filtered kuitansi ke CSV, Excel, atau PDF.
@@ -461,13 +459,15 @@ def export_kuitansi(
     T73: tambah format=pdf untuk backup/archive list kuitansi (landscape, branding-aware).
 
     Digunakan oleh Auditor/Admin untuk analisis offline (spreadsheet) atau arsip PDF.
+
+    FASE4-S5B: tenant scoping via require_tenant_scope dependency.
     """
     if format not in ("csv", "xlsx", "pdf"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "format harus 'csv'|'xlsx'|'pdf'")
     if status_filter not in ("draft", "finalized", "rejected", "all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "status_filter harus 'draft'|'finalized'|'rejected'|'all'")
 
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    visible_tenant_ids = scope.visible_tenant_ids
 
     filters, _ = _build_filters(
         db, visible_tenant_ids,
@@ -499,11 +499,12 @@ def export_kuitansi(
 
 # ===== v1.5-B: Per-kuitansi PDF generator =====
 
-@router.get("/{kuitansi_id}/pdf")
+@router.get("/{kuitansi_id}/pdf", tags=['Kuitansi'])
 def get_kuitansi_pdf(
     kuitansi_id: int,
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v1.5-B: Generate single-kuitansi PDF (FLIPUS branding, A4 portrait).
@@ -515,29 +516,33 @@ def get_kuitansi_pdf(
 
     RBAC: tenant-scoped (BENDAHARA/PENDETA own tenant, AUDITOR/ADMIN uni-scope).
     T89: PII masking — non-BENDAHARA/PENDETA dapat masked.
+
+    FASE4-S5B: require_tenant_scope ensures cross-tenant isolation at SQL level.
     """
     from fastapi.responses import StreamingResponse
+
     from app.utils.number_to_words import rupiah_to_words
     try:
         from reportlab.lib import colors as rl_colors
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
         )
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "reportlab belum terinstall — pip install reportlab",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'reportlab belum terinstall — pip install reportlab') from None
 
-    # Fetch kuitansi dengan tenant-scope RBAC
-    visible_tenant_ids = _get_visible_tenant_ids(db, current)
+    # Fetch kuitansi dengan tenant-scope RBAC (FASE4-S5B: dari require_tenant_scope)
+    visible_tenant_ids = scope.visible_tenant_ids
     k = db.query(Kuitansi).filter(
         Kuitansi.id == kuitansi_id,
         Kuitansi.tenant_id.in_(visible_tenant_ids),
-        Kuitansi.is_purged == False,
+        Kuitansi.is_purged == False,  # noqa: E712)
     ).first()
     if not k:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Kuitansi tidak ditemukan / di luar scope Anda")
@@ -764,7 +769,7 @@ def get_kuitansi_pdf(
         id_rekap_mingguan=k.id_rekap_mingguan,
         nomor_kuitansi_token=k.nomor_kuitansi[:32] if k.nomor_kuitansi else None,
         action=f"KUITANSI_PDF_DOWNLOAD_user_{current['id']}_k_{k.id}",
-        payload_hash=f"format=pdf_single",
+        payload_hash="format=pdf_single",
     ))
     db.commit()
 
@@ -780,9 +785,9 @@ def get_kuitansi_pdf(
 
 def _export_csv(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate CSV streaming response."""
@@ -815,7 +820,7 @@ def _export_csv(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_CSV_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=csv",
+        payload_hash="format=csv",
     ))
     db.commit()
 
@@ -832,26 +837,23 @@ def _export_csv(
 
 def _export_xlsx(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate XLSX streaming response. Requires openpyxl."""
     try:
         from openpyxl import Workbook
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "openpyxl belum terinstall — pip install openpyxl",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'openpyxl belum terinstall — pip install openpyxl') from None
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Kuitansi"
 
     # Headers (bold)
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     ws.append(headers)
     for cell in ws[1]:
@@ -892,7 +894,7 @@ def _export_xlsx(
             ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
         except Exception:
             # If any column has issues, skip auto-size for it
-            pass
+            logger.exception(f"auto-size column {col_letter!r} gagal, skip")
 
     # Save to bytes
     output = io.BytesIO()
@@ -904,7 +906,7 @@ def _export_xlsx(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_XLSX_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=xlsx",
+        payload_hash="format=xlsx",
     ))
     db.commit()
 
@@ -924,9 +926,9 @@ def _export_xlsx(
 
 def _export_pdf(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate PDF list kuitansi (landscape, FLIPUS branding). T73.
@@ -936,16 +938,17 @@ def _export_pdf(
     try:
         from reportlab.lib import colors as rl_colors
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
         )
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "reportlab belum terinstall — pip install reportlab",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'reportlab belum terinstall — pip install reportlab') from None
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -961,7 +964,6 @@ def _export_pdf(
 
     # FLIPUS brand colors
     COLOR_PRIMARY = rl_colors.HexColor("#1B4332")  # green tua
-    COLOR_GOLD = rl_colors.HexColor("#B8860B")
     COLOR_BORDER = rl_colors.HexColor("#e5e7eb")
 
     styles = getSampleStyleSheet()
@@ -1074,7 +1076,7 @@ def _export_pdf(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_PDF_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=pdf",
+        payload_hash="format=pdf",
     ))
     db.commit()
 
@@ -1083,4 +1085,196 @@ def _export_pdf(
         iter([pdf_bytes]),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ===== FASE 2 S6/R5: Single-Kuitansi Recompute =====
+
+class RecomputePorsiSingleOut(BaseModel):
+    """Schema response untuk POST /kuitansi/{id}/recompute-porsi (single).
+
+    Single source of truth policy (R5):
+    - Stored snapshot di kuitansi adalah immutable per kuitansi (audit-friendly).
+    - Endpoint ini untuk override: kalau Auditor/Admin yakin PersentaseConfig sudah benar
+      dan ingin apply ke satu kuitansi spesifik (misal: koreksi manual satu data).
+    - Setiap recompute menulis ke audit_logs dengan before/after/config_snapshot
+      agar bisa di-trace 100% kenapa porsi berubah dari nilai awalnya.
+    """
+    status: str
+    kuitansi_id: int
+    nomor_kuitansi: str
+    before: dict
+    after: dict
+    changed: bool
+    porsi_recomputed_at: str
+    config_snapshot: dict
+    audit_log_id: int
+
+
+@router.post("/{kuitansi_id}/recompute-porsi", tags=['Kuitansi'], response_model=RecomputePorsiSingleOut)
+def recompute_porsi_single(
+    kuitansi_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    FASE 2 S6/R5: Recompute porsi untuk SATU kuitansi.
+
+    Path: POST /api/v1/kuitansi/{kuitansi_id}/recompute-porsi
+
+    RBAC:
+    - ADMIN_UNI: boleh recompute kuitansi di seluruh uni-nya.
+    - AUDITOR_MISI: boleh recompute kuitansi di misi-nya saja.
+    - BENDAHARA / KETUA_KEUANGAN / PENDETA: DILARANG (cukup lihat stored snapshot).
+
+    Catatan:
+    - Endpoint ini HARUS idempotent: kalau dipanggil 2x dengan config sama,
+      nilai before/after akan sama (changed=False), jadi tidak merusak data.
+    - Field porsi_recomputed_at di-update ke waktu UTC sekarang setelah recompute.
+    - Audit log immutable (append-only) — tidak pernah di-update atau dihapus.
+    """
+    if current_user["role"] not in ("ADMIN_UNI", "AUDITOR_MISI"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Recompute single hanya untuk ADMIN_UNI / AUDITOR_MISI",
+        )
+
+    k = db.query(Kuitansi).filter(Kuitansi.id == kuitansi_id).first()
+    if not k:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Kuitansi #{kuitansi_id} tidak ditemukan")
+    if k.is_purged:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kuitansi sudah di-purge, tidak bisa di-recompute")
+
+    # RBAC scope check: ADMIN_UNI = seluruh uni, AUDITOR_MISI = misi-nya saja
+    tenant = db.query(Tenant).filter(Tenant.id == k.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tenant kuitansi tidak valid")
+
+    caller = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
+    if current_user["role"] == "ADMIN_UNI":
+        if not caller or not caller.nama_uni or tenant.nama_uni != caller.nama_uni:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Kuitansi ini di luar Uni Anda",
+            )
+    elif current_user["role"] == "AUDITOR_MISI":
+        if not tenant.misi_konferens_id or tenant.misi_konferens_id != caller.misi_konferens_id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Kuitansi ini di luar Misi Anda",
+            )
+
+    # Ambil PersentaseConfig MISI scope (single source of truth config)
+    cfg_row = (
+        db.query(PersentaseConfig)
+        .filter(
+            PersentaseConfig.scope == "MISI",
+            PersentaseConfig.ref_id == tenant.misi_konferens_id,
+        )
+        .first()
+    )
+    if not cfg_row:
+        # SDA doctrine defaults
+        cfg_x, cfg_pt, cfg_kh = 0.0, 0.5, 0.5
+        cfg_xu, cfg_ptu, cfg_khu = 0.0, 0.0, 0.0
+        cfg_source = "SDA_DOCTRINE_DEFAULT"
+        config_id = None
+    else:
+        cfg_x = cfg_row.pct_x_jemaat
+        cfg_pt = cfg_row.pct_pt_jemaat
+        cfg_kh = cfg_row.pct_khusus_jemaat
+        cfg_xu = cfg_row.pct_x_uni
+        cfg_ptu = cfg_row.pct_pt_uni
+        cfg_khu = cfg_row.pct_khusus_uni
+        cfg_source = f"PersentaseConfig.id={cfg_row.id}"
+        config_id = cfg_row.id
+
+    # Snapshot BEFORE
+    before = {
+        "porsi_kantor_misi": k.porsi_kantor_misi or 0,
+        "porsi_kas_jemaat": k.porsi_kas_jemaat or 0,
+        "porsi_khusus_misi": k.porsi_khusus_misi or 0,
+        "porsi_khusus_jemaat": k.porsi_khusus_jemaat or 0,
+        "porsi_x_uni": k.porsi_x_uni or 0,
+        "porsi_pt_uni": k.porsi_pt_uni or 0,
+        "porsi_khusus_uni": k.porsi_khusus_uni or 0,
+    }
+
+    # Hitung ulang pakai Jerry Model B (compute_porsi)
+    porsi = compute_porsi(
+        x=k.perpuluhan_x_angka or 0,
+        pt=k.pt_angka or 0,
+        kh=k.khusus_angka or 0,
+        pct_x_jemaat=cfg_x,
+        pct_pt_jemaat=cfg_pt,
+        pct_khusus_jemaat=cfg_kh,
+        pct_x_uni=cfg_xu,
+        pct_pt_uni=cfg_ptu,
+        pct_khusus_uni=cfg_khu,
+    )
+
+    new_kantor_misi = porsi["pm_x"] + porsi["pm_pt"] + porsi["pm_kh"]
+    new_kas_jemaat = porsi["pj_x"] + porsi["pj_pt"] + porsi["pj_kh"]
+
+    # Tulis ke DB (snapshot override)
+    k.porsi_kantor_misi = new_kantor_misi
+    k.porsi_kas_jemaat = new_kas_jemaat
+    k.porsi_khusus_misi = porsi["pm_kh"]
+    k.porsi_khusus_jemaat = porsi["pj_kh"]
+    k.porsi_x_uni = porsi["pu_x"]
+    k.porsi_pt_uni = porsi["pu_pt"]
+    k.porsi_khusus_uni = porsi["pu_kh"]
+    k.porsi_recomputed_at = datetime.now(UTC)
+
+    # Snapshot AFTER
+    after = {
+        "porsi_kantor_misi": k.porsi_kantor_misi,
+        "porsi_kas_jemaat": k.porsi_kas_jemaat,
+        "porsi_khusus_misi": k.porsi_khusus_misi,
+        "porsi_khusus_jemaat": k.porsi_khusus_jemaat,
+        "porsi_x_uni": k.porsi_x_uni,
+        "porsi_pt_uni": k.porsi_pt_uni,
+        "porsi_khusus_uni": k.porsi_khusus_uni,
+    }
+    changed = before != after
+
+    # Audit log (immutable, append-only) — FASE 2 S6/R5
+    audit = AuditLog(
+        tenant_id=k.tenant_id,
+        id_rekap_mingguan=k.id_rekap_mingguan,
+        nomor_kuitansi_token=k.nomor_kuitansi,
+        action="recompute_porsi_single",
+        porsi_dana_misi=new_kantor_misi,
+        payload_hash=(
+            f"kuitansi_id={kuitansi_id}|user_id={current_user['id']}|"
+            f"role={current_user['role']}|"
+            f"before={before}|after={after}|"
+            f"config_source={cfg_source}|config_id={config_id}|"
+            f"pct_x_j={cfg_x},pct_pt_j={cfg_pt},pct_kh_j={cfg_kh},"
+            f"pct_x_u={cfg_xu},pct_pt_u={cfg_ptu},pct_kh_u={cfg_khu}|"
+            f"changed={changed}"
+        ),
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(audit)
+
+    return RecomputePorsiSingleOut(
+        status="ok",
+        kuitansi_id=k.id,
+        nomor_kuitansi=k.nomor_kuitansi,
+        before=before,
+        after=after,
+        changed=changed,
+        porsi_recomputed_at=k.porsi_recomputed_at.isoformat(),
+        config_snapshot={
+            "source": cfg_source,
+            "pct_x_jemaat": cfg_x,
+            "pct_pt_jemaat": cfg_pt,
+            "pct_khusus_jemaat": cfg_kh,
+            "pct_x_uni": cfg_xu,
+            "pct_pt_uni": cfg_ptu,
+            "pct_khusus_uni": cfg_khu,
+        },
+        audit_log_id=audit.id,
     )

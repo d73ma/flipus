@@ -20,10 +20,9 @@ _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)
 
-from app.core.database import SessionLocal
-from app.core.security import encrypt_pii
-from app.models.user import User
-
+from app.core.database import SessionLocal  # noqa: E402
+from app.core.security import encrypt_pii  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 # Username → dummy number (avoid real numbers — pakai range 6281234500xx khusus dummy)
 DUMMY_NUMBERS = {

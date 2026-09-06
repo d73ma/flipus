@@ -1,5 +1,7 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, BigInteger, func
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, func
+
 from app.core.database import Base
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

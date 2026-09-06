@@ -13,9 +13,9 @@ Usage:
     python3 scripts/smoke_laporan_m7.py
 """
 import os
-import sys
-import json
 import sqlite3
+import sys
+
 import requests
 
 BASE = os.environ.get("FLIPUS_BASE", "http://localhost:8000")

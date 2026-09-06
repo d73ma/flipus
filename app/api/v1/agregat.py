@@ -12,20 +12,19 @@ Endpoint:
 - GET /agregat/misi-list — list misi + summary (untuk Admin Uni)
 """
 
-from typing import List, Optional
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.security import decrypt_pii
-from app.models.transaction import Kuitansi
+from app.core.tenant_scope import TenantScope, require_tenant_scope
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
 from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni, PersentaseConfig
+from app.models.transaction import Kuitansi
 from app.utils.number_to_words import bilang, terbilang  # noqa
 from app.utils.sabat_counter import get_current_sabat
 
@@ -49,8 +48,8 @@ class MingguanItem(BaseModel):
 class AgregatTenantOut(BaseModel):
     tenant_id: int
     nama_jemaat: str
-    bulan: Optional[str] = None
-    minggu_items: List[MingguanItem]
+    bulan: str | None = None
+    minggu_items: list[MingguanItem]
     grand_total_x: int
     grand_total_pt: int
     grand_total_khusus: int
@@ -63,9 +62,9 @@ class AgregatTenantOut(BaseModel):
 class JemaatSummary(BaseModel):
     tenant_id: int
     nama_jemaat: str
-    nama_pendeta: Optional[str] = None
-    nama_ketua_keuangan: Optional[str] = None
-    nama_bendahara: Optional[str] = None
+    nama_pendeta: str | None = None
+    nama_ketua_keuangan: str | None = None
+    nama_bendahara: str | None = None
     jumlah_kuitansi: int = 0
     total_x: int = 0
     total_pt: int = 0
@@ -75,10 +74,10 @@ class JemaatSummary(BaseModel):
 
 
 class AgregatMisiOut(BaseModel):
-    misi_id: Optional[int] = None
+    misi_id: int | None = None
     nama_misi: str
-    bulan: Optional[str] = None
-    minggu_items: List[MingguanItem]
+    bulan: str | None = None
+    minggu_items: list[MingguanItem]
     grand_total: int
     grand_total_x: int
     grand_total_pt: int
@@ -87,7 +86,7 @@ class AgregatMisiOut(BaseModel):
     grand_total_porsi_jemaat: int
     grand_total_huruf: str
     jemaat_count: int
-    jemaat_summary: List[JemaatSummary]
+    jemaat_summary: list[JemaatSummary]
 
 
 # ===== T47: Live calculation helpers =====
@@ -97,7 +96,7 @@ PCT_DEFAULTS_LIVE = {
 }
 
 
-def _load_pct_contexts(db: Session, tenant_ids: List[int]) -> tuple[dict, dict, dict]:
+def _load_pct_contexts(db: Session, tenant_ids: list[int]) -> tuple[dict, dict, dict]:
     """Pre-load PersentaseConfig (MISI + UNI scope) untuk daftar tenant_ids.
 
     Returns:
@@ -186,19 +185,19 @@ def _compute_live_porsi(
 
 
 def _aggregate_by_minggu(
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenants_map: dict,
     misi_cfg: dict,
     uni_cfg: dict,
     db: Session,
-) -> List[MingguanItem]:
+) -> list[MingguanItem]:
     """T47: Group rows by id_rekap_mingguan + hitung porsi LIVE (bukan stored).
 
     Sebelumnya pakai r.porsi_kantor_misi + r.porsi_kas_jemaat (stored dari
     approval). Sekarang recompute dari PersentaseConfig supaya agregat
     reactive terhadap slider changes.
     """
-    grouped = {}
+    grouped: dict[str, list] = {}  # S4-D.R1: type annotation for mypy
     for r in rows:
         if r.id_rekap_mingguan not in grouped:
             grouped[r.id_rekap_mingguan] = []
@@ -247,7 +246,7 @@ def _aggregate_by_minggu(
     return items
 
 
-def _filter_by_bulan(rows: List[Kuitansi], bulan: Optional[str]) -> List[Kuitansi]:
+def _filter_by_bulan(rows: list[Kuitansi], bulan: str | None) -> list[Kuitansi]:
     """Filter rows by bulan (YYYY-MM). Kalau None, return all."""
     if not bulan:
         return rows
@@ -256,9 +255,9 @@ def _filter_by_bulan(rows: List[Kuitansi], bulan: Optional[str]) -> List[Kuitans
 
 # ===== GET /agregat/tenant =====
 
-@router.get("/tenant", response_model=AgregatTenantOut)
+@router.get("/tenant", tags=['Agregat'], response_model=AgregatTenantOut)
 def agregat_tenant(
-    bulan: Optional[str] = None,
+    bulan: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -273,7 +272,7 @@ def agregat_tenant(
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == tenant.id)
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .all()
     )
     rows = _filter_by_bulan(rows, bulan)
@@ -306,9 +305,9 @@ def agregat_tenant(
 
 # ===== GET /agregat/misi =====
 
-@router.get("/misi", response_model=AgregatMisiOut)
+@router.get("/misi", tags=['Agregat'], response_model=AgregatMisiOut)
 def agregat_misi(
-    bulan: Optional[str] = None,
+    bulan: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -340,7 +339,7 @@ def agregat_misi(
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id.in_(jemaat_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .all()
     )
     rows = _filter_by_bulan(rows, bulan)
@@ -361,7 +360,7 @@ def agregat_misi(
             func.coalesce(func.sum(Kuitansi.porsi_kas_jemaat), 0).label("porsi_jemaat"),
         )
         .filter(Kuitansi.tenant_id.in_(jemaat_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .group_by(Kuitansi.tenant_id)
         .all()
     )
@@ -382,7 +381,7 @@ def agregat_misi(
                 func.coalesce(func.sum(Kuitansi.porsi_kas_jemaat), 0).label("porsi_jemaat"),
             )
             .filter(Kuitansi.tenant_id.in_(jemaat_ids))
-            .filter(Kuitansi.is_purged == False)
+            .filter(Kuitansi.is_purged == False)  # noqa: E712
             .filter(Kuitansi.tanggal_sabat.like(f"{bulan}%"))
             .group_by(Kuitansi.tenant_id)
             .all()
@@ -438,9 +437,9 @@ def agregat_misi(
 
 # ===== GET /agregat/uni =====
 
-@router.get("/uni", response_model=AgregatMisiOut)
+@router.get("/uni", tags=['Agregat'], response_model=AgregatMisiOut)
 def agregat_uni(
-    bulan: Optional[str] = None,
+    bulan: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -479,7 +478,7 @@ def agregat_uni(
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id.in_(tenant_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .all()
     )
     rows = _filter_by_bulan(rows, bulan)
@@ -500,7 +499,7 @@ def agregat_uni(
             func.coalesce(func.sum(Kuitansi.porsi_kas_jemaat), 0).label("porsi_jemaat"),
         )
         .filter(Kuitansi.tenant_id.in_(tenant_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .filter(Kuitansi.tanggal_sabat.like(f"{bulan}%") if bulan else True)
         .group_by(Kuitansi.tenant_id)
         .all()
@@ -566,7 +565,7 @@ class ChartMingguanItem(BaseModel):
 class ChartMingguanOut(BaseModel):
     scope: str  # "tenant" | "misi" | "uni"
     n_weeks: int
-    items: List[ChartMingguanItem]
+    items: list[ChartMingguanItem]
     total_x: int
     total_pt: int
     total_khusus: int
@@ -586,7 +585,7 @@ def _short_label(tgl: str) -> str:
         return tgl
 
 
-def _build_chart_for_tenant_ids(db: Session, tenant_ids: List[int], n_weeks: int) -> List[ChartMingguanItem]:
+def _build_chart_for_tenant_ids(db: Session, tenant_ids: list[int], n_weeks: int) -> list[ChartMingguanItem]:
     """Bangun list ChartMingguanItem untuk kumpulan tenant (1+, sesuai scope)."""
     if not tenant_ids:
         return []
@@ -607,7 +606,7 @@ def _build_chart_for_tenant_ids(db: Session, tenant_ids: List[int], n_weeks: int
         .limit(n_weeks)
         .all()
     )
-    items: List[ChartMingguanItem] = []
+    items: list[ChartMingguanItem] = []
     for r in reversed(rows):  # chronological order
         sum_x = int(r.sum_x or 0)
         sum_pt = int(r.sum_pt or 0)
@@ -634,7 +633,7 @@ class SabatIniItem(BaseModel):
     no: int
     id_kuitansi: int
     nomor_kuitansi: str
-    nama_pemberi: Optional[str] = None
+    nama_pemberi: str | None = None
     tanggal_sabat: str
     perpuluhan_x_angka: int
     pt_angka: int
@@ -686,7 +685,7 @@ class SabatIniOut(BaseModel):
     bulan_nama: str
     tahun: int
     # Rows table (1 row per kuitansi untuk tenant; 1 row per jemaat/misi untuk auditor/admin)
-    items: List[dict]
+    items: list[dict]
     grand_total_x: int
     grand_total_pt: int
     grand_total_khusus: int
@@ -717,34 +716,17 @@ class YtdBarOut(BaseModel):
     total_porsi_jemaat: int        # bar 6: porsi Jemaat (X + PT)
 
 
-def _tenant_ids_for_caller(db: Session, current_user: dict) -> tuple[List[int], str]:
-    """Return (tenant_ids_in_scope, scope_label) sesuai role caller."""
-    role = current_user["role"]
-    tenant_id = current_user["tenant_id"]
-    caller = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not caller:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant caller tidak ditemukan")
-
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        return [tenant_id], "tenant"
-    elif role == "AUDITOR_MISI":
-        if not caller.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait misi")
-        ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id == caller.misi_konferens_id).all()]
-        return ids, "misi"
-    elif role == "ADMIN_UNI":
-        if not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait uni")
-        ids = [t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()]
-        return ids, "uni"
-    else:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak dikenal")
+# FASE4-S6H: helper `_tenant_ids_for_caller` dihapus karena semua caller
+# (agregat.py::/sabat-ini, /ytd) sudah migrasi ke `TenantScope` (single source
+# of truth). Endpoint tinggal derive `scope_label` dari `scope.role` via map
+# inline — sama dengan pattern `chart_mingguan` (L1228).
+# Untuk role → scope_label map, lihat inline map di masing-masing endpoint.
 
 
-@router.get("/sabat-ini", response_model=SabatIniOut)
+@router.get("/sabat-ini", tags=['Agregat'], response_model=SabatIniOut)
 def agregat_sabat_ini(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     Tabel 'Persembahan sabat ini' — data HANYA untuk sabat berjalan.
@@ -765,8 +747,12 @@ def agregat_sabat_ini(
         9: "September", 10: "Oktober", 11: "November", 12: "Desember",
     }
 
-    tenant_ids, scope = _tenant_ids_for_caller(db, current_user)
-    role = current_user["role"]
+    tenant_ids = scope.visible_tenant_ids
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
 
     # Base query: kuitansi di sabat ini
     base_q = (
@@ -776,7 +762,7 @@ def agregat_sabat_ini(
         .filter(Kuitansi.is_purged == False)  # noqa: E712
     )
 
-    items: List[dict] = []
+    items: list[dict] = []
     sum_x = sum_pt = sum_kh = 0
     sum_misi_x = sum_misi_pt = sum_misi_kh = 0
     sum_uni_x = sum_uni_pt = sum_uni_kh = 0
@@ -823,9 +809,10 @@ def agregat_sabat_ini(
         }
 
     # Untuk scope tenant: resolve 1× saja (1 tenant → 1 misi → 1 uni)
-    tenant_pct: Optional[dict] = None
-    if scope == "tenant":
-        caller_tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
+    tenant_pct: dict | None = None
+    if scope_label == "tenant":
+        # FASE4-S6H: pakai scope.primary_tenant_id (sebelumnya current_user["tenant_id"]).
+        caller_tenant = db.query(Tenant).filter(Tenant.id == scope.primary_tenant_id).first()
         if caller_tenant and caller_tenant.misi_konferens_id:
             tenant_pct = _resolve_pct_for_misi(caller_tenant.misi_konferens_id)
             misi_row = db.query(MisiKonferens).filter(MisiKonferens.id == caller_tenant.misi_konferens_id).first()
@@ -834,8 +821,9 @@ def agregat_sabat_ini(
                 tenant_pct.update(uni_pct)
         else:
             tenant_pct = {**PCT_DEFAULTS}
+        assert tenant_pct is not None  # nosec B101 — S4-D.R1: narrow Optional[dict] for mypy
 
-    if scope == "tenant":
+    if scope_label == "tenant":
         # Bendahara/Pendeta/Ketua: tampilkan per-kuitansi dengan nama_pemberi
         rows = base_q.filter(Kuitansi.status == "finalized").order_by(Kuitansi.nomor_kuitansi.asc()).all()
         for i, r in enumerate(rows, start=1):
@@ -1001,7 +989,7 @@ def agregat_sabat_ini(
         bulan_nama = ""
 
     return SabatIniOut(
-        scope=scope,
+        scope=scope_label,
         sabat_ke=sabat_ke,
         tanggal_sabat=tanggal_sabat,
         hari=info["hari"],
@@ -1026,10 +1014,10 @@ def agregat_sabat_ini(
     )
 
 
-@router.get("/ytd", response_model=YtdBarOut)
+@router.get("/ytd", tags=['Agregat'], response_model=YtdBarOut)
 def agregat_ytd(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     6 angka kumulatif YTD (Year-To-Date) untuk grafik batang.
@@ -1053,11 +1041,16 @@ def agregat_ytd(
     sabat_ke = info["sabat_ke"]
     tanggal_sabat = info["tanggal_sabat"]
 
-    tenant_ids, scope = _tenant_ids_for_caller(db, current_user)
+    tenant_ids = scope.visible_tenant_ids
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
     if not tenant_ids:
         # No tenants in scope — return zeros
         return YtdBarOut(
-            scope=scope, tahun=tahun, sabat_ke=sabat_ke,
+            scope=scope_label, tahun=tahun, sabat_ke=sabat_ke,
             total_perpuluhan=0, total_persembahan_terpadu=0,
             total_persembahan_khusus=0, total_porsi_misi_x=0,
             total_porsi_misi_pt=0, total_porsi_jemaat=0,
@@ -1178,7 +1171,7 @@ def agregat_ytd(
     # YTD bar uses total Porsi Misi (gabungan X + PT) + KH Misi (Layer 1 only, KH punya logic sendiri)
     # Untuk YtdBarOut: total_porsi_misi_x/pm_pt = langsung dari live calc
     return YtdBarOut(
-        scope=scope,
+        scope=scope_label,
         tahun=tahun,
         sabat_ke=sabat_ke,
         total_perpuluhan=total_x,
@@ -1190,52 +1183,39 @@ def agregat_ytd(
     )
 
 
-@router.get("/chart/mingguan", response_model=ChartMingguanOut)
+@router.get("/chart/mingguan", tags=['Agregat'], response_model=ChartMingguanOut)
 def chart_mingguan(
     n_weeks: int = 8,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     T34: Chart data perpuluhan 8 minggu terakhir.
 
-    Scope:
-    - BENDAHARA/KETUA_KEUANGAN/PENDETA: tenant caller
+    FASE4-S6B: pakai TenantScope — single source of truth (gantikan inline
+    role-branch di bawah yang duplikat logika resolve_tenant_scope).
+
+    Scope otomatis dari role caller:
+    - BENDAHARA/KETUA_KEUANGAN/PENDETA: own tenant
     - AUDITOR_MISI: semua jemaat di misi caller
-    - ADMIN_UNI: semua jemaat di uni caller
+    - ADMIN_UNI: semua jemaat via chain uni → misi → jemaat
     """
     if n_weeks < 1 or n_weeks > 52:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "n_weeks harus 1-52")
 
-    role = current_user["role"]
-    tenant_id = current_user["tenant_id"]
-    caller = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not caller:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant caller tidak ditemukan")
+    scope_label_map = {
+        "BENDAHARA": "tenant", "KETUA_KEUANGAN": "tenant", "PENDETA": "tenant",
+        "AUDITOR_MISI": "misi", "ADMIN_UNI": "uni",
+    }
+    scope_label = scope_label_map.get(scope.role, "unknown")
 
-    if role in ("BENDAHARA", "KETUA_KEUANGAN", "PENDETA"):
-        scope = "tenant"
-        tenant_ids = [tenant_id]
-    elif role == "AUDITOR_MISI":
-        scope = "misi"
-        if not caller.misi_konferens_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait misi")
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.misi_konferens_id == caller.misi_konferens_id).all()]
-    elif role == "ADMIN_UNI":
-        scope = "uni"
-        if not caller.nama_uni:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Caller belum terkait uni")
-        tenant_ids = [t.id for t in db.query(Tenant).filter(Tenant.nama_uni == caller.nama_uni).all()]
-    else:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Role tidak dikenal")
-
-    items = _build_chart_for_tenant_ids(db, tenant_ids, n_weeks)
+    items = _build_chart_for_tenant_ids(db, scope.visible_tenant_ids, n_weeks)
     total_x = sum(i.x for i in items)
     total_pt = sum(i.pt for i in items)
     total_kh = sum(i.khusus for i in items)
 
     return ChartMingguanOut(
-        scope=scope,
+        scope=scope_label,
         n_weeks=n_weeks,
         items=items,
         total_x=total_x,

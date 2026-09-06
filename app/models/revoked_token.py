@@ -8,7 +8,7 @@ sebelum izinkan akses.
 Tokens akan expire dengan sendirinya (default ACCESS_TOKEN_EXPIRE_MINUTES).
 Kita tetap simpan revoked entry sampai exp — query sederhana: WHERE jti = ?
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Index
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.sql import func
 
 from app.core.database import Base

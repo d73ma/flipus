@@ -17,9 +17,9 @@ _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)
 
-from app.core.database import SessionLocal
-from app.core.security import encrypt_pii
-from app.models.user import User
+from app.core.database import SessionLocal  # noqa: E402
+from app.core.security import encrypt_pii  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 
 def main():
@@ -69,8 +69,8 @@ def main():
         db.commit()
         print(f"\n✓ {updated} Bendahara ter-update ke {wa_clean}")
         print("\nSekarang bisa test:")
-        print(f'  curl -X POST http://localhost:8000/api/v1/wa/inbound \\')
-        print(f'    -H "Content-Type: application/json" \\')
+        print('  curl -X POST http://localhost:8000/api/v1/wa/inbound \\')
+        print('    -H "Content-Type: application/json" \\')
         print(f'    -d \'{{"sender": "{wa_clean}", "message": "X 100rb, PT 50rb", "id": "test-jerry-1"}}\'')
     finally:
         db.close()

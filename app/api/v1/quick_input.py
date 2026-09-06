@@ -26,24 +26,25 @@ Endpoint:
 RBAC:
 - BENDAHARA only (input keuangan eksklusif Bendahara per Jerry 2026-08-27)
 """
-import sys
 from datetime import datetime
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.v1.auth import get_current_user
 from app.core.security import encrypt_pii
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
-from app.models.kategori_pemasukan import KategoriPemasukan, KuitansiKategori
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.audit import AuditLog
-from app.utils.kategori_alias import generate_alias, normalize_nama, is_valid_nama
+from app.models.kategori_pemasukan import KategoriPemasukan, KuitansiKategori
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.utils.kategori_alias import generate_alias, is_valid_nama, normalize_nama
+from app.utils.nomor_kuitansi import generate_id_rekap_mingguan, generate_nomor_kuitansi
 from app.utils.sabat_counter import get_effective_sabat_for_input
-from app.utils.nomor_kuitansi import generate_nomor_kuitansi, generate_id_rekap_mingguan
 
 router = APIRouter()
 
@@ -75,8 +76,8 @@ class QuickInputItem(BaseModel):
 
 class QuickInputRequest(BaseModel):
     nama_pemberi: str
-    items: List[QuickInputItem]
-    tanggal_sabat: Optional[str] = None  # override; default = sabat berjalan
+    items: list[QuickInputItem]
+    tanggal_sabat: str | None = None  # override; default = sabat berjalan
     simpan_lanjut: bool = False  # kalau true, batch save (multiple kuitansi sekaligus)
 
     model_config = ConfigDict(from_attributes=True)
@@ -86,8 +87,8 @@ class QuickInputResponse(BaseModel):
     ok: bool
     nomor_kuitansi: str
     total_pemberian: int
-    kategori_baru: List[str]
-    kategori_existing: List[str]
+    kategori_baru: list[str]
+    kategori_existing: list[str]
     tanggal_sabat: str
 
 
@@ -107,7 +108,7 @@ def _get_or_create_kategori(db: Session, tenant_id: int, nama: str) -> tuple[Kat
         db.query(KategoriPemasukan)
         .filter(
             KategoriPemasukan.tenant_id == tenant_id,
-            KategoriPemasukan.is_aktif == True,
+            KategoriPemasukan.is_aktif == True,  # noqa: E712)
         )
         .filter(
             (KategoriPemasukan.alias == match_alias) |
@@ -169,7 +170,7 @@ def _generate_nomor_for_kuitansi(db: Session, tenant: Tenant, tanggal: str) -> s
         .filter(
             Kuitansi.tenant_id == tenant.id,
             Kuitansi.nomor_kuitansi.like(f"%/{tenant.initial_jemaat}/{bulan_romawi}/{tahun_2d}"),
-            Kuitansi.is_purged == False,
+            Kuitansi.is_purged == False,  # noqa: E712)
         )
         .count()
     )
@@ -179,18 +180,21 @@ def _generate_nomor_for_kuitansi(db: Session, tenant: Tenant, tanggal: str) -> s
 
 # ===== Endpoint =====
 
-@router.post("/kuitansi/quick-input", response_model=QuickInputResponse)
+@router.post("/kuitansi/quick-input", tags=['QuickInput'], response_model=QuickInputResponse)
 def quick_input(
     body: QuickInputRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v2.0 Quick Input endpoint — PWA friendly.
 
+    FASE4-S6E: pakai TenantScope (gantikan inline tenant_id = current_user).
+    Tenant baru di-bind ke primary_tenant_id caller (BENDAHARA selalu single-tenant).
+
     Validasi:
-    - User.role == BENDAHARA
-    - User.tenant_id aktif
+    - scope.role == BENDAHARA
+    - scope.primary_tenant_id aktif
     - Minimal 1 item dengan nominal > 0
     - nama_pemberi: 1-100 char
 
@@ -203,11 +207,10 @@ def quick_input(
     6. Audit log + return response
     """
     # RBAC: hanya Bendahara yang boleh input keuangan
-    role = current_user.get("role")
-    if role != "BENDAHARA":
+    if scope.role != "BENDAHARA":
         raise HTTPException(403, "Hanya Bendahara yang boleh input kuitansi keuangan")
 
-    tenant_id = current_user.get("tenant_id")
+    tenant_id = scope.primary_tenant_id
     if not tenant_id:
         raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
 
@@ -226,7 +229,7 @@ def quick_input(
         raise HTTPException(400, "Minimal 1 item dengan nominal > 0")
 
     # Tenant aktif
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True)  # noqa: E712.  .first()
     if not tenant:
         raise HTTPException(404, f"Tenant {tenant_id} tidak aktif atau tidak ditemukan")
 
@@ -236,7 +239,7 @@ def quick_input(
             datetime.strptime(body.tanggal_sabat, "%Y-%m-%d")
             tanggal = body.tanggal_sabat
         except ValueError:
-            raise HTTPException(400, "tanggal_sabat format harus YYYY-MM-DD")
+            raise HTTPException(400, 'tanggal_sabat format harus YYYY-MM-DD') from None
     else:
         sabat_info = get_effective_sabat_for_input()
         tanggal = sabat_info["tanggal_sabat"]
@@ -280,7 +283,7 @@ def quick_input(
         # Status (v2.0: DRAFT dulu, approval Ketua→Pendeta)
         # Untuk v1.5 backward-compat, default 'finalized'
         status="finalized",
-        created_by_user_id=current_user.get("id"),
+        created_by_user_id=scope.user_id,
         created_via="pwa",  # v2.0: distinct from 'web'/'ocr'/'wa'
     )
     db.add(k)
@@ -337,7 +340,7 @@ def quick_input(
     # Audit log (pattern: scanner.py — action encode user_id, payload_hash=nomor)
     db.add(AuditLog(
         tenant_id=tenant_id,
-        action=f"QUICK_INPUT_CREATE_user_{current_user.get('id')}_count_{len(pivot_data)}_new_{len(kategori_baru_list)}",
+        action=f"QUICK_INPUT_CREATE_user_{scope.user_id}_count_{len(pivot_data)}_new_{len(kategori_baru_list)}",
         payload_hash=nomor,
         porsi_dana_misi=k.porsi_kantor_misi,
     ))
@@ -363,13 +366,15 @@ class KategoriListItem(BaseModel):
     urutan: int
 
 
-@router.get("/kategori/list", response_model=List[KategoriListItem])
+@router.get("/kategori/list", tags=['QuickInput'], response_model=list[KategoriListItem])
 def list_kategori(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    scope: TenantScope = Depends(require_tenant_scope),
 ):
     """
     v2.0 M2 — List kategori aktif untuk tenant user (untuk autocomplete UI QuickInput).
+
+    FASE4-S6E: pakai TenantScope.visible_tenant_ids (cross-tenant audit aware).
 
     RBAC: semua role yang sudah login boleh lihat (read-only).
     Auto-create kategori BARU tetap hanya BENDAHARA (lihat endpoint quick-input).
@@ -377,14 +382,13 @@ def list_kategori(
     Return diurutkan: rutin dulu (X, PT) → lalu by urutan → lalu by nama.
     Limit: 100 (cukup untuk dropdown autocomplete).
     """
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(400, "User tidak terkait dengan tenant/jemaat")
+    if not scope.visible_tenant_ids:
+        return []
 
     rows = (
         db.query(KategoriPemasukan)
-        .filter(KategoriPemasukan.tenant_id == tenant_id)
-        .filter(KategoriPemasukan.is_aktif == True)
+        .filter(KategoriPemasukan.tenant_id.in_(scope.visible_tenant_ids))
+        .filter(KategoriPemasukan.is_aktif == True)  # noqa: E712)
         .order_by(
             KategoriPemasukan.is_rutin.desc(),  # rutin (X, PT) di atas
             KategoriPemasukan.urutan.asc(),
