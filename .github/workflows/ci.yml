@@ -34,16 +34,18 @@ env:
   # Pinned for reproducibility — FASE 5 Sprint 3 (Sept 2026).
   PYTHON_VERSION: "3.11"
   # Coverage gate (must not drop below this).
-  # FASE 5 Sprint 3 baseline: 69.2% (now superseded by Sprint 4's coverage work).
+  # FASE 5 Sprint 3: 69.2% baseline.
   # FASE 5 Sprint 4: temporarily lowered to 53.0% (current measured: 53.5%).
-  # Rationale: Sprint 4 closed dep vulns (37→0 effective) and unblocked tests by
-  # fixing the MasterKonfig dangling import + fastapi/instrumentator upgrade,
-  # but a major dep upgrade bumped coverage by <1pp (now covering 4 pure-logic
-  # utils + anonymizer edge cases = 51 new tests). The bulk of remaining
-  # uncovered LOC lives in API routers (wa_input, kuitansi, reports, etc.)
-  # that need full integration tests with auth + tenant fixtures.
-  # Sprint 5 target: lift to 65% via integration tests for the top-3 routers.
-  COVERAGE_MIN: "53.0"
+  #   Rationale: Sprint 4 closed dep vulns but only minor coverage lift.
+  # FASE 5 Sprint 5: raised to 60.0% (current measured: 61.1%).
+  #   Sprint 5 added 70+ integration tests across 8 modules:
+  #   kuitansi.py 17.8% → 47.8%, reports.py 30.8% → 43.0%,
+  #   pengeluaran.py 35.1% → 45.0%, pdf_generator.py 20.3% → 86.2%,
+  #   whatsapp.py 17.7% → 60.4%, users.py 35.2% → 75.0%, local_ocr 20.5% → 87.2%,
+  #   pdf_gabungan 15.5% → 100%, laporan_gabungan 36.5% → 49.2%.
+  # Sprint 6 target: 67% via integration tests for wa_input state machine +
+  # pengeluaran_wa + master.py seed endpoint + QuickInput POST endpoint.
+  COVERAGE_MIN: "60.0"
   # Same as `.env.example` — secrets are stubbed in CI, real values are
   # only injected via GitHub Actions secrets at deploy time.
   DATABASE_URL_LOCAL: "sqlite:///./flipus_ci.db"

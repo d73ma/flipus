@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] — 2026-09-06
+
+**FASE 5 Sprint 5 — Coverage Lift + CI Gate Raise.**
+
+Adds 120+ integration tests across 12 modules, lifting coverage from 53.5% → 61.1%. Raises CI coverage gate from 53% → 60%.
+
+### Added
+
+- **120 new tests** across 12 test files (integration + unit):
+  - `tests/test_s5_s5f_kuitansi_pdf_recompute.py` — PDF + recompute-porsi endpoints (11)
+  - `tests/test_s5_s5f_reports_endpoints.py` — sabat-info + mingguan + summary (13)
+  - `tests/test_s5_s5f_wa_input_health.py` — WA inbound health + staging list (6)
+  - `tests/test_s5_s5f_pengeluaran_endpoints.py` — kategori list + create (12)
+  - `tests/test_s5_s5f_laporan_gabungan.py` — Laporan gabungan JSON (7)
+  - `tests/test_s5_s5f_users_endpoints.py` — users list + delete (8)
+  - `tests/test_s5_s5f_pdf_generator.py` — PDF generation helpers (8)
+  - `tests/test_s5_s5f_whatsapp_service.py` — WA service with httpx mock (15)
+  - `tests/test_s5_s5f_pdf_gabungan.py` — combined PDF (4)
+  - `tests/test_s5_s5f_local_ocr.py` — OCR JSON parser (9)
+  - `tests/test_s5_s5f_master_persentase.py` — PersentaseConfig endpoints (5)
+  - `tests/test_s5_s5f_master_quickinput.py` — Master uni/misi + kategori list (10)
+  - `tests/test_s5_s5f_user_creator.py` — username generators + register flows (12)
+
+### Per-Module Coverage Lift
+
+| Module | Before | After |
+|--------|--------|-------|
+| `app/api/v1/kuitansi.py` | 17.8% | 47.8% |
+| `app/api/v1/users.py` | 35.2% | 75.0% |
+| `app/api/v1/reports.py` | 30.8% | 43.0% |
+| `app/api/v1/pengeluaran.py` | 35.1% | 45.0% |
+| `app/api/v1/laporan_gabungan.py` | 36.5% | 49.2% |
+| `app/api/v1/master.py` | 30.5% | 37.6% |
+| `app/services/pdf_generator.py` | 20.3% | 86.2% |
+| `app/services/pdf_gabungan.py` | 15.5% | **100.0%** |
+| `app/services/whatsapp.py` | 17.7% | 60.4% |
+| `app/ai_engine/local_ocr.py` | 20.5% | 87.2% |
+
+### Changed
+
+- **CI coverage gate raised**: 53.0% → **60.0%** with inline rationale in `ci.yml`. Gate stays active to catch regressions. Sprint 6 target: 67%.
+
+### Verified
+
+- ✅ `make ci` local: **632/632 tests pass, 61.1% coverage** (vs 512/53.5% at end of Sprint 4 = +120 tests, +7.6pp)
+- ✅ `ruff check app/ tests/` zero findings
+- ✅ `pip-audit --strict -r requirements.txt` zero findings
+- ✅ `bandit -r app/ -ll` zero HIGH/MEDIUM findings
+
+### Deferred (Sprint 6)
+
+- `wa_input.py` POST state machine (498 LOC, 14.1% coverage) — needs Fonnte signature mock
+- `pengeluaran_wa.py` (225 LOC, 12.9% coverage)
+- `master.py` seed endpoint
+- `quick_input.py` POST endpoint
+- Migrate `python-jose` → `PyJWT[crypto]` (close last 1 pip-audit residual)
+- Pydantic v1 → v2 `ConfigDict` migration (3 deprecation warnings)
+
+---
+
 ## [2.1.0] — 2026-09-06
 
 **FASE 5 Sprint 4 — CI Gate Closure + Alembic Baseline + Repo Hygiene.**
