@@ -34,7 +34,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "S105", "S106", "B011"]
+"tests/**/*.py" = ["S101", "S105", "S106", "B011", "S110"]  # noqa: S110 — try-except-pass acceptable in test reset/cleanup hooks
 "scripts/**/*.py" = ["T201", "S101", "S105"]
 "app/core/logging_config.py" = ["T201"]  # formatter emits via logging, not print
 # Models pakai `Optional[T]` (bukan `T | None`) untuk konsistensi dengan
