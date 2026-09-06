@@ -22,7 +22,7 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
@@ -48,8 +48,7 @@ class KategoriPengeluaranOut(BaseModel):
     is_rutin: bool
     urutan: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class KategoriPengeluaranCreate(BaseModel):
@@ -79,8 +78,7 @@ class PengeluaranOut(BaseModel):
     rejected_at: str | None = None
     rejected_reason: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PengeluaranCreate(BaseModel):

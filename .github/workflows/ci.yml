@@ -172,28 +172,14 @@ jobs:
           retention-days: 14
 
       - name: pip-audit — dependency vulnerabilities
-        # FASE 5 Sprint 4 — closed 31/37 advisories by upgrading
-        # cryptography 44.0.3 → 50.0.1, Pillow 11.1.0 → 12.3.0,
-        # python-multipart 0.0.12 → 0.0.32, starlette 0.47.3 → 0.52.1,
-        # fastapi 0.116.1 → 0.141.1.
-        #
-        # Residual 6 vulns ditracking, masing-masing punya rationale:
-        # - PYSEC-2026-1325 (ecdsa 0.19.2): Minerva timing attack, no fix.
-        #   FLIPUS pakai HS256 only — ecdsa library tidak dipakai untuk
-        #   crypto operations. Replacement (PyJWT) di-defer ke FASE 6.
-        # - PYSEC-2026-161/249/248/2281/2280 (starlette): butuh starlette
-        #   1.0+ yang break prometheus-fastapi-instrumentator==7.0.0.
-        #   Di-defer sampai library upgrade kompatibel.
+        # FASE 5 Sprint 4 — closed 31/37 advisories via dep upgrades.
+        # FASE 5 Sprint 6 — migrated python-jose → PyJWT[crypto], closing
+        # the last 1 residual (PYSEC-2026-1325 / ecdsa no-fix).
         #
         # Audit fresh di setiap push via: osv + pypa advisories.
-        run: |
-          pip-audit --strict --no-deps \
-            --ignore-vuln PYSEC-2026-1325 \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln PYSEC-2026-249 \
-            --ignore-vuln PYSEC-2026-248 \
-            --ignore-vuln PYSEC-2026-2281 \
-            --ignore-vuln PYSEC-2026-2280
+        # Zero suppressions — pip-audit runs with --strict and exits
+        # non-zero on any vuln found.
+        run: pip-audit --strict --no-deps
 
   # =============================================================
   # 4. Test — pytest with coverage gate

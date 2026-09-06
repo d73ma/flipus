@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] — 2026-09-06
+
+**FASE 5 Sprint 6 — PyJWT Migration + Pydantic v2 Cleanup + wa_input Coverage.**
+
+Migrates off abandoned `python-jose` to `PyJWT[crypto]`, closes the last 1 pip-audit
+vuln without suppression. Updates 3 Pydantic v1 schemas to v2 `ConfigDict`. Adds 32
+unit tests for wa_input.py parsers.
+
+### Security
+
+- **pip-audit: 0 vulns, 0 suppressions** — Migrated `python-jose==3.5.0` (transitive
+  `ecdsa==0.19.2`) → `PyJWT[crypto]==2.13.0`. Closes PYSEC-2026-1325 (ecdsa Minerva
+  timing attack, no upstream fix) by removing ecdsa from dependency tree entirely.
+  CI `pip-audit --strict` now runs with zero `--ignore-vuln` flags.
+
+### Changed
+
+- **JWT library**: `python-jose[cryptography]==3.5.0` → `pyjwt[crypto]==2.13.0`.
+  API difference: `from jose import JWTError, jwt` → `import jwt; from jwt import
+  InvalidTokenError as JWTError`. HS256 signing/verification unchanged.
+- **Pydantic v2 Config migration** (3 sites):
+  - `app/api/v1/pengeluaran.py:51` (KategoriPengeluaranOut)
+  - `app/api/v1/pengeluaran.py:82` (PengeluaranOut)
+  - `app/api/v1/wa_input.py:73` (WaInboundPayload — with `Field(alias="from")` for
+    the renamed `fields` dict).
+
+### Added
+
+- `tests/test_s6_s6f_wa_input_parsers.py` — 32 unit tests for `_normalize_phone`,
+  `_parse_amount`, `_parse_shortcut_format`, `_parse_shortcut_input`.
+
+### Verified
+
+- ✅ `make ci` local: **664/664 tests pass, 61.8% coverage, 0 bandit, 0 pip-audit**.
+- ✅ Pydantic v1 deprecation warnings: 3 → 0.
+- ✅ Total test-run warnings: 7 → 3 (Pydantic eliminated).
+
+### Deferred (Sprint 7+)
+
+- Coverage 61.8% < target 67% (gate stays at 60%, lifted in Sprint 5).
+- `wa_input.py` POST state machine (~440 LOC, lines 379-874) — needs Fonnte signature
+  mock + state-machine fixture.
+- mypy 76 errors (pre-existing baseline 61) — gradual type annotation work.
+
+---
+
 ## [2.2.0] — 2026-09-06
 
 **FASE 5 Sprint 5 — Coverage Lift + CI Gate Raise.**

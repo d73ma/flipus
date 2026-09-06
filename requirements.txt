@@ -3,7 +3,11 @@ uvicorn[standard]==0.35.0
 sqlalchemy==2.0.35
 pydantic==2.12.0
 pydantic-settings==2.15.0
-python-jose[cryptography]==3.5.0
+# FASE 5 Sprint 6 — migrate dari python-jose ke PyJWT[crypto].
+# PyJWT lebih aktif maintained, tidak depend pada ecdsa library
+# (yang punya PYSEC-2026-1325 Minerva timing attack, no-fix).
+# FLIPUS pakai HS256 only — PyJWT support penuh via cryptography.
+pyjwt[crypto]==2.13.0
 passlib[bcrypt]==1.7.4
 bcrypt>=4.0,<5.0
 
@@ -19,6 +23,10 @@ python-multipart==0.0.32
 # Di-suppress via `pip-audit --ignore-vuln` di Makefile + ci.yml — lihat rationale
 # di FASE5_SPRINT4_SUMMARY.md §A2.
 starlette>=0.52.1,<1.0  # transitif via fastapi>=0.123.0
+# ecdsa: REMOVED FASE 5 Sprint 6 — transitif via python-jose yang sudah di-uninstall.
+# ecdsa 0.19.2 punya PYSEC-2026-1325 (no-fix Minerva timing attack).
+# Mitigasi: migrate python-jose → PyJWT (security.py). HS256 JWT tidak pernah
+# invoke ecdsa code path.
 
 apscheduler==3.10.4
 httpx==0.28.1

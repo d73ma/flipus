@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -67,12 +67,10 @@ class WaInboundPayload(BaseModel):
     button_id: str | None = None
     button_text: str | None = None
     # Legacy Fonnte fields
-    from_: str | None = None  # alias
+    from_: str | None = Field(default=None, alias="from")  # noqa: A003
     id: str | None = None  # Fonnte message ID
 
-    class Config:
-        populate_by_name = True
-        fields = {"from_": "from"}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 def _normalize_phone(raw: str) -> str:
