@@ -2,7 +2,7 @@ from app.models.audit import AuditLog
 from app.models.blast_job import BlastJob
 from app.models.kategori_pemasukan import KategoriPemasukan, KuitansiKategori
 from app.models.kategori_pengeluaran import KategoriPengeluaran
-from app.models.master import MasterKonfig
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
 from app.models.notification import Notification
 from app.models.pengeluaran import Pengeluaran
 
@@ -19,6 +19,6 @@ __all__ = [
     "Tenant", "User", "Kuitansi", "AuditLog", "Notification", "RevokedToken",
     "RefreshToken",
     "KategoriPemasukan", "KuitansiKategori", "KategoriPengeluaran", "Pengeluaran",
-    "MasterKonfig",
     "BlastJob", "SyncOutbox", "WaSession",
+    "Uni", "MisiKonferens", "PersentaseConfig",
 ]
