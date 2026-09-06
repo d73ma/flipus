@@ -390,7 +390,7 @@ def reset_rate_limiter():
     # slowapi >= 0.1.9: storage adalah MovingWindowMemoryList dengan .reset()
     storage = getattr(limiter, "_storage", None)
     if storage is not None and hasattr(storage, "reset"):
-        try:
-            storage.reset()
-        except Exception:
-            pass  # jika backend storage tidak support reset, skip
+          try:
+              storage.reset()
+          except Exception:
+              pass  # noqa: S110 — jika backend storage tidak support reset, skip
