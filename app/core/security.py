@@ -2,10 +2,11 @@ import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 
+import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Header, HTTPException, Request
 from fastapi import status as _status
-from jose import JWTError, jwt
+from jwt import InvalidTokenError as JWTError
 from passlib.context import CryptContext
 
 from app.core.config import settings

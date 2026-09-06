@@ -52,13 +52,9 @@ security-bandit:  ## AST-based security scan (bandit). Skips tests/ scripts/.
 	$(BANDIT) -r app/ -ll --skip B105,B106,B107
 
 security-audit:  ## Audit installed deps against PyPI Advisory DB (pip-audit)
-	$(PIPAUDIT) --strict \
-		--ignore-vuln PYSEC-2026-1325 \
-		--ignore-vuln PYSEC-2026-161 \
-		--ignore-vuln PYSEC-2026-249 \
-		--ignore-vuln PYSEC-2026-248 \
-		--ignore-vuln PYSEC-2026-2281 \
-		--ignore-vuln PYSEC-2026-2280
+	# FASE 5 Sprint 6 — pyjwt migration removed ecdsa dependency.
+	# Zero suppressions needed. Run with --strict for fail-on-any-vuln.
+	$(PIPAUDIT) --strict
 
 security:  ## Run all security checks (bandit + pip-audit)
 	$(MAKE) security-bandit

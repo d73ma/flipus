@@ -7,7 +7,7 @@ Covers:
 - _parse_shortcut_format: 'X 100rb PT 50rb' → {x: 100000, pt: 50000}.
 - _parse_shortcut_input: 'X 100rb, PT 50rb, KH 25rb' → {x: 100000, pt: 50000, kh: 25000}.
 """
-import pytest
+
 
 from app.api.v1.wa_input import (
     _normalize_phone,
