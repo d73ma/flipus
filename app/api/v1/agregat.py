@@ -821,7 +821,7 @@ def agregat_sabat_ini(
                 tenant_pct.update(uni_pct)
         else:
             tenant_pct = {**PCT_DEFAULTS}
-        assert tenant_pct is not None  # S4-D.R1: narrow Optional[dict] for mypy
+        assert tenant_pct is not None  # nosec B101 — S4-D.R1: narrow Optional[dict] for mypy
 
     if scope_label == "tenant":
         # Bendahara/Pendeta/Ketua: tampilkan per-kuitansi dengan nama_pemberi

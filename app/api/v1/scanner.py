@@ -355,7 +355,7 @@ def save_ocr_batch(
                     k.nomor_kuitansi = nomor
                     k.id = None  # reset supaya tidak konflik PK setelah rollback
                     _sp = db.begin_nested()  # buka savepoint baru
-                    time.sleep(0.01 + random.random() * 0.04)
+                    time.sleep(0.01 + random.random() * 0.04)  # nosec B311 — non-crypto jitter for race-condition guard
                     continue
         except Exception as e:
             try:

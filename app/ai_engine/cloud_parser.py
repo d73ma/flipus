@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def _img_hash(img_bytes: bytes) -> str:
     """MD5 hash untuk verifikasi image integrity (detect cache/hallucination)."""
-    return hashlib.md5(img_bytes).hexdigest()[:12]
+    return hashlib.md5(img_bytes, usedforsecurity=False).hexdigest()[:12]  # nosec B324
 
 
 def _is_suspicious_response(parsed: dict) -> tuple[bool, str]:

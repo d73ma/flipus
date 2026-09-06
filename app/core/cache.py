@@ -115,7 +115,7 @@ def _make_cache_key(func_name: str, args: tuple, kwargs: dict) -> str:
         safe_kwargs = {k: str(v) for k, v in kwargs.items()}
 
     payload = f"{func_name}|{safe_args}|{safe_kwargs}"
-    return hashlib.md5(payload.encode()).hexdigest()
+    return hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()  # nosec B324
 
 
 def cached(ttl_seconds: int = 300):

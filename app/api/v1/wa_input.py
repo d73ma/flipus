@@ -500,7 +500,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
                 if not chosen:
                     _send_fonnte_reply(phone, "Jemaat tidak valid. Coba lagi.")
                     return {"status": "ok"}
-                assert chosen is not None  # S4-D.R1: narrow for mypy
+                assert chosen is not None  # nosec B101 — S4-D.R1: narrow for mypy
                 set_state(db, session, "AWAIT_X", payload={"tenant_id": chosen.id, "nama_jemaat": chosen.nama_jemaat_lokal})
                 _send_fonnte_reply(phone, _reply_await_kategori("X")["message"], _reply_await_kategori("X")["buttons"])
                 db.commit()
@@ -696,7 +696,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
                 today_sabat = get_effective_sabat_for_input()["tanggal_sabat"]
                 # Use millisecond precision + random suffix to avoid UNIQUE collision
                 import random as _rand
-                unique_suffix = f"{int(time.time() * 1000)}-{_rand.randint(1000, 9999)}"
+                unique_suffix = f"{int(time.time() * 1000)}-{_rand.randint(1000, 9999)}"  # nosec B311 — UNIQUE-collision dedupe, non-crypto
                 # Insert staging row (is_finalized=False)
                 k = Kuitansi(
                     tenant_id=tenant_id,
