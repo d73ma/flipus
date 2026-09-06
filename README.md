@@ -8,13 +8,13 @@
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![React](https://img.shields.io/badge/react-18-blue.svg)]()
 
-<!-- FASE 5 Sprint 3: CI status badges. The placeholder `<OWNER>/<REPO>`
+<!-- FASE 5 Sprint 3: CI status badges. The path `d73ma/flipus`
      below MUST be updated to the real GitHub path after the repo is
      pushed. Until then, the badges will 404 — that's expected and
      not a code bug. -->
-[![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml)
-[![Secrets Scan](https://github.com/<OWNER>/<REPO>/actions/workflows/secrets-scan.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/secrets-scan.yml)
-[![codecov](https://codecov.io/gh/<OWNER>/<REPO>/branch/main/graph/badge.svg)](https://codecov.io/gh/<OWNER>/<REPO>)
+[![CI](https://github.com/d73ma/flipus/actions/workflows/ci.yml/badge.svg)](https://github.com/d73ma/flipus/actions/workflows/ci.yml)
+[![Secrets Scan](https://github.com/d73ma/flipus/actions/workflows/secrets-scan.yml/badge.svg)](https://github.com/d73ma/flipus/actions/workflows/secrets-scan.yml)
+[![codecov](https://codecov.io/gh/d73ma/flipus/branch/main/graph/badge.svg)](https://codecov.io/gh/d73ma/flipus)
 [![Coverage](https://img.shields.io/badge/coverage-69.2%25-yellow.svg)]()
 
 ---
