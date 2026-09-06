@@ -81,3 +81,11 @@ storage/audit-dumps/
 .tmp_ruff/
 .tmp_ruff/**/
 .ruff_e402_fix.py
+
+# FASE 5 Sprint 6 — Tenant branding uploads (testing artifacts).
+# These are uploaded via /settings/branding for white-label per tenant.
+# Real production uploads should NOT be tracked — only DB rows matter.
+storage/tenants/*/logo_*.png
+storage/tenants/*/logo_*.svg
+storage/tenants/*/logo_*.jpg
+storage/tenants/*/logo_*.jpeg
