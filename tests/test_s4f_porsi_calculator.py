@@ -11,7 +11,6 @@ Jerry Model B (final 2026-08-23) — pct_uni applied to TOTAL.
 - validate: pct_jemaat + pct_uni ≤ 1.0 per tier
 """
 
-import pytest
 
 from app.utils.porsi_calculator import (
     compute_porsi,

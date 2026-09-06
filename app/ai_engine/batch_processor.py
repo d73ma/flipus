@@ -7,7 +7,7 @@ v1.4 hardening (2026-08-22):
 - Fallback ke Ollama lokal kalau Gemini NEED_REVIEW (best-effort)
 """
 import logging
-from typing import List, Dict
+
 from app.ai_engine.cloud_parser import validate_with_gemini
 from app.ai_engine.local_ocr import extract_with_ollama, parse_ocr_payload
 from app.services.financial_calculator import calculate_distribution
@@ -51,7 +51,7 @@ def _try_ollama_fallback(img_path: str, primary_ocr: dict) -> dict:
         return primary_ocr
 
 
-def process_batch(image_paths: List[str]) -> Dict:
+def process_batch(image_paths: list[str]) -> dict:
     results = []
     total_x = 0
     total_pt = 0

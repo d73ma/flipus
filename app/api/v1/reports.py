@@ -1,23 +1,28 @@
 """FLIPUS v1.1 — Reports API + WA Blast + Sabat Info."""
-from datetime import datetime, timezone
-from typing import List, Optional
+import logging
+import traceback
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from app.core.database import get_db
+from sqlalchemy.orm import Session
+
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.tenant_scope import (
-    TenantScope, require_tenant_scope,
+    TenantScope,
+    require_tenant_scope,
 )
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
-from app.models.user import User
 from app.models.audit import AuditLog
-from app.utils.number_to_words import terbilang
-from app.utils.sabat_counter import get_sabat_info, get_current_sabat
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.models.user import User
+from app.services.notification_service import EventType, create_notification
 from app.utils.nomor_kuitansi import bulan_ke_romawi
-from app.services.whatsapp import send_simple_message
-from app.services.notification_service import create_notification, EventType
+from app.utils.number_to_words import terbilang
+from app.utils.sabat_counter import get_current_sabat
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -64,7 +69,7 @@ class BlastRequest(BaseModel):
     target: str = None
     target_role: str = None  # 'pendeta' | 'ketua' (lowercase, frontend-friendly)
     # v1.5-C: idempotency_key — UUID dari frontend per click. Cegah double-blast.
-    idempotency_key: Optional[str] = None
+    idempotency_key: str | None = None
 
 class SabatInfoOut(BaseModel):
     sabat_ke: int
@@ -111,7 +116,7 @@ def get_sabat_info_endpoint(
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.tanggal_sabat == info["tanggal_sabat"])
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .count()
     )
 
@@ -201,14 +206,14 @@ def ringkasan_summary(
 ):
     """Dashboard ringkasan per bulan untuk Ketua Keuangan."""
     if not bulan:
-        bulan = datetime.now(timezone.utc).strftime("%Y-%m")
+        bulan = datetime.now(UTC).strftime("%Y-%m")
     tenant = db.query(Tenant).filter(Tenant.id == current_user["tenant_id"]).first()
     if not tenant:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == tenant.id)
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .all()
     )
     items = []
@@ -263,7 +268,6 @@ def blast_weekly(
     detail jelas. Sebelumnya Jerry screenshot "Request failed with status code 500"
     tanpa tahu akar masalah.
     """
-    import sys as _sys_t108
     import traceback as _tb_t108
     try:
         return _blast_weekly_impl(request, db, current_user)
@@ -271,11 +275,11 @@ def blast_weekly(
         raise
     except Exception as e:
         tb = _tb_t108.format_exc()
-        print(f"[DBG blast-500] user={current_user.get('id')} tenant={current_user.get('tenant_id')} idem={request.idempotency_key}\n{tb}", file=_sys_t108.stderr, flush=True)
+        logger.exception(f"[DBG blast-500] user={current_user.get('id')} tenant={current_user.get('tenant_id')} idem={request.idempotency_key}\n{tb}")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"Gagal blast WA: {type(e).__name__}: {str(e)[:300]}. Cek backend log untuk traceback lengkap.",
-        )
+        ) from e
 
 
 def _blast_weekly_impl(request, db, current_user):
@@ -297,10 +301,9 @@ def _blast_weekly_impl(request, db, current_user):
         )
         if existing:
             # Return response yg tersimpan — tidak kirim ulang
-            print(
+            logger.info(
                 f"[WA-BLAST-IDEM] idempotency_key={request.idempotency_key} "
                 f"reusing existing job id={existing.id} status={existing.status}",
-                file=_sys.stderr,
             )
             return BlastOut(
                 status=existing.status,
@@ -313,13 +316,13 @@ def _blast_weekly_impl(request, db, current_user):
             )
 
     if not id_rekap_mingguan:
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today = datetime.now(UTC).strftime("%Y%m%d")
         id_rekap_mingguan = "RK-" + today
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Kuitansi.tenant_id == current_user["tenant_id"])
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .filter(Kuitansi.status == "finalized")  # T23-1: hanya approved
         .all()
     )
@@ -356,10 +359,10 @@ def _blast_weekly_impl(request, db, current_user):
         target = target_user.nomor_whatsapp
 
     # === Generate PDF ===
-    from app.services.pdf_generator import generate_mingguan_pdf
     import os as os_mod
-    import sys as _sys
     from pathlib import Path as Path_mod
+
+    from app.services.pdf_generator import generate_mingguan_pdf
 
     pdf_dir = Path_mod(os_mod.path.join(os_mod.getcwd(), "storage", "temp"))
     pdf_dir.mkdir(parents=True, exist_ok=True)
@@ -375,7 +378,7 @@ def _blast_weekly_impl(request, db, current_user):
             output_path=str(pdf_path),
         )
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal generate PDF: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal generate PDF: {e}") from e
 
     # === Kirim via Fonnte (PDF attachment) ===
     khusus_line = f"• Khusus : Rp {sum_khusus:,}\n" if sum_khusus > 0 else ""
@@ -418,7 +421,7 @@ def _blast_weekly_impl(request, db, current_user):
             db.commit()
             db.refresh(blast_job)
         except Exception as e:
-            print(f"[WA-BLAST-IDEM] failed to create job: {e}", file=_sys.stderr)
+            logger.exception(f"[WA-BLAST-IDEM] failed to create job: {e}")
             db.rollback()
             blast_job = None
 
@@ -440,20 +443,15 @@ def _blast_weekly_impl(request, db, current_user):
                 or fonnte_resp.get("detail") in ("sent", "ok")
             )
         ) else "failed"
-        blast_job.completed_at = _dt.now(timezone.utc)
+        blast_job.completed_at = _dt.now(UTC)
         try:
             db.commit()
         except Exception as e:
-            print(f"[WA-BLAST-IDEM] failed to update job: {e}", file=_sys.stderr)
+            logger.exception(f"[WA-BLAST-IDEM] failed to update job: {e}")
             db.rollback()
 
     # Log blast attempt (visible di uvicorn stderr)
-    print(
-        f"[WA-BLAST] target_role={target_role} phone={target} "
-        f"status={fonnte_resp.get('status') if isinstance(fonnte_resp, dict) else 'unknown'} "
-        f"reason={fonnte_resp.get('reason', '-') if isinstance(fonnte_resp, dict) else '-'}",
-        file=_sys.stderr,
-    )
+    logger.error( f"[WA-BLAST] target_role={target_role} phone={target} " f"status={fonnte_resp.get('status') if isinstance(fonnte_resp, dict) else 'unknown'} " f"reason={fonnte_resp.get('reason', '-') if isinstance(fonnte_resp, dict) else '-'}" )
 
     audit = AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -485,7 +483,7 @@ def _blast_weekly_impl(request, db, current_user):
             if u:
                 target_name = f"{u.nama_lengkap} ({target})"
         except Exception:
-            pass
+            logger.exception("lookup target_name gagal")
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             f"Gagal kirim WA ke {target_name}. Alasan: {reason}. "
@@ -495,7 +493,7 @@ def _blast_weekly_impl(request, db, current_user):
     # Notify Pendeta (lookup per-tenant, T29 fix)
     pendeta_user = (
         db.query(User)
-        .filter(User.tenant_id == current_user["tenant_id"], User.role == "PENDETA", User.is_active == True)  # noqa: E712
+        .filter(User.tenant_id == current_user["tenant_id"], User.role == "PENDETA", User.is_active == True)  # noqa: E712  # noqa: E712
         .order_by(User.id.asc())
         .first()
     )
@@ -571,7 +569,7 @@ class LaporanKeuanganRequest(BaseModel):
     sabat_from: int  # sabat ke-N dalam tahun (misal 28)
     sabat_to: int    # sabat ke-M (misal 34, harus >= sabat_from)
     tahun: int = None  # default: tahun sabat berjalan
-    blast_targets: List[str] = ["PENDETA", "KETUA_KEUANGAN"]  # role target auto-blast
+    blast_targets: list[str] = ["PENDETA", "KETUA_KEUANGAN"]  # role target auto-blast
     sanitize_nama_for_ketua: bool = True  # T36: Ketua dapat versi tanpa nama
 
 
@@ -589,7 +587,7 @@ class LaporanKeuanganOut(BaseModel):
     pdf_filename: str
     pdf_size_bytes: int
     pdf_url: str
-    blast_results: List[dict] = []
+    blast_results: list[dict] = []
 
 
 def _sabat_ke_to_date_range(tahun: int, sabat_from: int, sabat_to: int) -> tuple[str, str]:
@@ -627,10 +625,6 @@ def generate_laporan_keuangan(
 
     RBAC: BENDAHARA / KETUA_KEUANGAN only.
     """
-    import logging
-    import traceback
-    logger = logging.getLogger(__name__)
-
     try:
         return _generate_laporan_keuangan_impl(payload, db, current_user, logger)
     except HTTPException:
@@ -643,14 +637,13 @@ def generate_laporan_keuangan(
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"Gagal generate laporan: {type(e).__name__}: {e}",
-        )
+        ) from e
 
 
 def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
     """Inner implementation — semua logic, di-wrap try/except di outer function."""
     # T107 DEBUG (2026-08-26): log role sebelum validasi untuk diagnosa error
-    import sys as _sys_dbg
-    print(f"[DBG laporan] role={current_user['role']!r} id={current_user.get('id')} tenant_id={current_user.get('tenant_id')}", file=_sys_dbg.stderr, flush=True)
+    logger.error(f"[DBG laporan] role={current_user['role']!r} id={current_user.get('id')} tenant_id={current_user.get('tenant_id')}")
     if current_user["role"] not in ("BENDAHARA", "KETUA_KEUANGAN"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Bendahara/Ketua Keuangan")
 
@@ -666,7 +659,7 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
     rows = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == current_user["tenant_id"])
-        .filter(Kuitansi.is_purged == False)  # noqa: E712
+        .filter(Kuitansi.is_purged == False)  # noqa: E712  # noqa: E712
         .filter(Kuitansi.status == "finalized")
         .filter(Kuitansi.tanggal_sabat >= date_from)
         .filter(Kuitansi.tanggal_sabat <= date_to)
@@ -692,9 +685,10 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant tidak ditemukan")
 
     # === Generate PDF ===
-    from app.services.pdf_generator import generate_mingguan_pdf
     import os as os_mod
     from pathlib import Path as Path_mod
+
+    from app.services.pdf_generator import generate_mingguan_pdf
 
     # Folder: storage/laporan/<tenant_id>/
     pdf_dir = Path_mod(os_mod.path.join(os_mod.getcwd(), "storage", "laporan", str(tenant.id)))
@@ -721,13 +715,13 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"Gagal generate PDF: {type(e).__name__}: {e}",
-        )
+        ) from e
 
     pdf_size = os_mod.path.getsize(pdf_path)
     pdf_url = f"/storage/laporan/{tenant.id}/{pdf_filename}"
 
     # === Auto-blast ===
-    blast_results: List[dict] = []
+    blast_results: list[dict] = []
     from app.services.whatsapp import send_document_message
 
     for target_role in payload.blast_targets:
@@ -774,9 +768,9 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
         if target_role == "KETUA_KEUANGAN" and payload.sanitize_nama_for_ketua:
             caption += "(Laporan versi aggregate — tanpa nama pemberi perorangan)\n\n"
         caption += (
-            f"Laporan ini disiapkan untuk rapat jemaat. Silakan review dan gunakan "
-            f"untuk dokumentasi resmi.\n\n"
-            f"--\nBendahara (FLIPUS auto-report)"
+            "Laporan ini disiapkan untuk rapat jemaat. Silakan review dan gunakan "
+            "untuk dokumentasi resmi.\n\n"
+            "--\nBendahara (FLIPUS auto-report)"
         )
 
         try:
@@ -799,9 +793,8 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
             })
         except Exception as e:
             # T107 (2026-08-26): log detail agar diagnosable dari frontend
-            import sys as _sys_dbg
             tb = traceback.format_exc()
-            print(f"[DBG blast-FAIL role={target_role}] {type(e).__name__}: {e}\n{tb}", file=_sys_dbg.stderr, flush=True)
+            logger.exception(f"[DBG blast-FAIL role={target_role}] {type(e).__name__}: {e}\n{tb}")
             blast_results.append({
                 "role": target_role,
                 "user_id": target_user.id,

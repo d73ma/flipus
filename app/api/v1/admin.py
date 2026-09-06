@@ -11,49 +11,51 @@ Endpoint manual untuk testing / recovery:
                                 ubah persentase dan ingin apply ke data lama juga.
 """
 
-from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+
+# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.audit import AuditLog
-from app.models.master import PersentaseConfig, MisiKonferens
+from app.models.master import PersentaseConfig
 from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
 from app.models.user import User
 from app.services import backup_service
+from app.services.notification_service import EventType, create_notification
+from app.services.whatsapp import get_device_status
+
 # FASE 2 S4/R3: migrasi dari legacy calculate_distribution (Layer 1+2) ke Jerry Model B (compute_porsi).
 # Single source of truth: semua call site yang recompute porsi harus pakai compute_porsi.
 from app.utils.porsi_calculator import compute_porsi
-from app.services.notification_service import create_notification, EventType
-from app.services.whatsapp import get_device_status
-# FASE 4 Sprint 6-F: pakai TenantScope untuk isolasi data multi-organisasi.
-from app.core.tenant_scope import (
-    TenantScope, require_tenant_scope,
-)
 
 router = APIRouter()
 
 
 def _now() -> datetime:
     """FASE 2 S6/R5: helper UTC timestamp untuk porsi_recomputed_at & audit logs."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ===== Fonnte Device Status (v1.5-F) =====
 
 class FonnteDeviceStatusOut(BaseModel):
     status: str  # 'connected' | 'disconnected' | 'disabled' | 'no_token' | 'error'
-    device: Optional[str] = None
-    phone: Optional[str] = None
-    quota: Optional[int] = None
-    quota_remaining: Optional[int] = None
-    expired: Optional[str] = None
-    reason: Optional[str] = None
+    device: str | None = None
+    phone: str | None = None
+    quota: int | None = None
+    quota_remaining: int | None = None
+    expired: str | None = None
+    reason: str | None = None
     checked_at: str
 
 
@@ -73,8 +75,8 @@ def get_fonnte_device_status(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya Admin Uni yang boleh cek device Fonnte")
 
     info = get_device_status()
-    from datetime import datetime, timezone
-    info["checked_at"] = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    info["checked_at"] = datetime.now(UTC).isoformat()
     return info
 
 
@@ -106,7 +108,7 @@ def trigger_manual_reset(
     try:
         trigger_reset_now()
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reset gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Reset gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -130,7 +132,7 @@ class BackupOut(BaseModel):
     filename: str
     size_bytes: int
     created_at: str
-    old_backups_deleted: List[str] = []
+    old_backups_deleted: list[str] = []
     method: str
 
 
@@ -160,9 +162,9 @@ def backup_db(
         else:
             result = backup_service.backup_database(retention=retention)
     except FileNotFoundError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Backup gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Backup gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -216,7 +218,7 @@ class BackupItemOut(BaseModel):
 
 
 class BackupListOut(BaseModel):
-    backups: List[BackupItemOut]
+    backups: list[BackupItemOut]
     count: int
 
 
@@ -278,11 +280,11 @@ def restore_db(
             auto_backup_before=payload.auto_backup_before,
         )
     except FileNotFoundError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Restore gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Restore gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -312,7 +314,7 @@ def trigger_manual_backup(
     try:
         result = trigger_backup_now()
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Backup gagal: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Backup gagal: {e}') from e
 
     db.add(AuditLog(
         tenant_id=current_user["tenant_id"],
@@ -358,7 +360,7 @@ class RecomputePorsiOut(BaseModel):
 
 @router.post("/recompute-porsi", tags=['Admin'], response_model=RecomputePorsiOut)
 def recompute_porsi_all(
-    tenant_id: Optional[int] = None,
+    tenant_id: int | None = None,
     db: Session = Depends(get_db),
     scope: TenantScope = Depends(require_tenant_scope),
 ):

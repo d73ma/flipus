@@ -28,10 +28,23 @@ import contextvars
 import json
 import logging
 import os
+
+# ---------------------------------------------------------------------------
+# FASE 5 Sprint 1 — Static service identity.
+# ---------------------------------------------------------------------------
+# Constants di-include di setiap log line agar multi-service aggregator
+# (Loki / CloudWatch / Datadog) bisa filter `{service="flipus"}` tanpa parse
+# nama logger (yang bisa bervariasi jika module di-rename).
+# Override via env `FLIPUS_SERVICE_NAME` / `FLIPUS_SERVICE_VERSION` bila
+# perlu jalankan multiple build (canary / blue-green) tanpa混淆 log.
+import os as _os_identity
 import sys
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
+
+SERVICE_NAME: str = _os_identity.environ.get("FLIPUS_SERVICE_NAME", "flipus")
+SERVICE_VERSION: str = _os_identity.environ.get("FLIPUS_SERVICE_VERSION", "1.5.0")
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +63,9 @@ user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 
 def set_request_context(
-    request_id: Optional[str] = None,
-    tenant_id: Optional[Any] = None,
-    user_id: Optional[Any] = None,
+    request_id: str | None = None,
+    tenant_id: Any | None = None,
+    user_id: Any | None = None,
 ) -> str:
     """Set request-scoped context. Returns request_id (new or existing)."""
     if request_id is None:
@@ -67,7 +80,7 @@ def set_request_context(
     return request_id
 
 
-def get_request_context() -> Dict[str, str]:
+def get_request_context() -> dict[str, str]:
     """Snapshot context saat ini untuk di-attach ke log records."""
     return {
         "request_id": request_id_var.get(),
@@ -112,11 +125,15 @@ class JSONFormatter(logging.Formatter):
         ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(record.created))
         ts += ".{:03d}Z".format(int(record.msecs))
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": ts,
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
+            # FASE 5 Sprint 1 — Static service identity (untuk multi-service
+            # log aggregator filtering, misal Loki {service="flipus"}).
+            "service": SERVICE_NAME,
+            "service_version": SERVICE_VERSION,
         }
 
         # Contextvars (request-scoped)
@@ -170,7 +187,7 @@ _configured = False
 
 
 def setup_logging(
-    level: Optional[str] = None,
+    level: str | None = None,
     stream: Any = None,
     force: bool = False,
 ) -> logging.Logger:
@@ -228,3 +245,77 @@ def get_logger(name: str) -> logging.Logger:
     begitu setup_logging() dipanggil di startup.
     """
     return logging.getLogger(name)
+
+
+# ---------------------------------------------------------------------------
+# FASE 5 Sprint 1 — Security event logger (consumed by FASE 5 Sprint 2 metrics).
+# ---------------------------------------------------------------------------
+# Counter `security_events_total{event_type}` akan di-instrument di S5-2 via
+# prometheus_client. Untuk saat ini hanya emits structured log line dengan
+# field `event_type` aggregator-friendly — siap untuk di-tap di Grafana /
+# CloudWatch alarm: kalau event_type="tenant_scope_violation" >10/menit →
+# possible probing attack.
+
+def log_security_event(
+    event_type: str,
+    *,
+    request: Any = None,
+    user_id: Any = None,
+    tenant_id: Any = None,
+    detail: str = "",
+) -> None:
+    """Emit security event log line.
+
+    Args:
+        event_type: salah satu konstanta di bawah (string label).
+        request: optional FastAPI Request untuk fallback IP.
+        user_id: attacker / caller user id (kalau ada, "-").
+        tenant_id: caller tenant (atau victim tenant, tergantung event).
+        detail: human-readable extra context.
+
+    Output JSON line punya field tambahan `event_type`, `security=true` —
+    aggregator bisa filter `{security="true"}` tanpa parse msg.
+    """
+    sec_logger = logging.getLogger("app.security")
+    extra: dict[str, Any] = {
+        "event_type": event_type,
+        "security": True,
+        "detail": detail[:500],  # bounded — avoid log injection
+    }
+    if user_id is not None:
+        extra["actor_user_id"] = str(user_id)
+    if tenant_id is not None:
+        extra["actor_tenant_id"] = str(tenant_id)
+    if request is not None:
+        try:
+            extra["client_ip"] = getattr(request.state, "client_ip", "-")
+            extra["http_path"] = request.url.path
+        except Exception:
+            sec_logger.exception("gagal extract request.client_ip / http_path dari request.state")
+    sec_logger.warning("security_event type=%s", event_type, extra=extra)
+
+    # FASE 5 Sprint 2 — also increment Prometheus counter so SOC alerts
+    # (rate>10/menit, dll) can fire dari `flipus_security_events_total`
+    # tanpa parse log. Lazy import untuk avoid circular at module load
+    # (logger.py is imported very early by app.main).
+    try:
+        from app.core.metrics import record_security_event
+        # outcome derived from event_type prefix: "login_*" / "tenant_*" / dll.
+        # Heuristik: kalau constanta ada di whitelist -> "ok" (logged, bukan
+        # attack). Pemantauan real attack dilakukan via alert rule di
+        # Prometheus / Loki, BUKAN dari label outcome.
+        outcome = "ok"
+        record_security_event(event_type, outcome=outcome)
+    except Exception:
+        # Metrics are best-effort — never let a missing prometheus_client
+        # break the security log line.
+        sec_logger.exception("record_security_event gagal; security log line sudah ditulis, metrics skipped")
+
+
+# Konstanta event_type (pakai konstanta, bukan free string, untuk konsistensi
+# filter di alert rule / dashboard).
+SEC_EVENT_TENANT_SCOPE_VIOLATION = "tenant_scope_violation"
+SEC_EVENT_LOGIN_FAILURE = "login_failure"
+SEC_EVENT_2FA_FAILURE = "2fa_failure"
+SEC_EVENT_PII_DECRYPT_FAILURE = "pii_decrypt_failure"
+SEC_EVENT_RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"

@@ -18,8 +18,9 @@ Usage:
 
 Assumes backend running di http://localhost:8000 dan DB sudah di-migrate.
 """
-import sys
 import os
+import sys
+
 import requests
 
 BASE = os.environ.get("FLIPUS_BASE", "http://localhost:8000")

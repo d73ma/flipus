@@ -1,6 +1,8 @@
 """FLIPUS v1.1 — SyncOutbox model."""
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, Index
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, func
+
 from app.core.database import Base
+
 
 class SyncOutbox(Base):
     """Anonymized payload jemaat siap di-pull Kantor Misi / Uni."""

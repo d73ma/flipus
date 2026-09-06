@@ -11,7 +11,6 @@ minimal 1 upper, 1 lower, 1 digit.
 import secrets
 import string
 
-
 # Exclude ambiguous chars
 _EXCLUDE = set("0O1lI")
 _CHARSET = "".join(c for c in (string.ascii_letters + string.digits) if c not in _EXCLUDE)
@@ -48,7 +47,7 @@ def generate_random_password(length: int = MIN_PASSWORD_LENGTH) -> str:
             f"length maksimal {MAX_PASSWORD_LENGTH}, dapat: {length}"
         )
     if length > len(_CHARSET):
-        raise ValueError(f"length terlalu panjang untuk charset yang tersedia")
+        raise ValueError("length terlalu panjang untuk charset yang tersedia")
 
     # Pakai secrets.choice untuk crypto-safe random
     while True:

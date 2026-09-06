@@ -13,18 +13,18 @@ Soft-delete: is_active=False. User masih ada di DB untuk audit trail,
 tapi tidak bisa login (cek di auth.py get_current_user).
 """
 
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.security import decrypt_pii
-from app.models.user import User
-from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni
 from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, Uni
+from app.models.tenant import Tenant
+from app.models.user import User
 
 router = APIRouter()
 
@@ -36,13 +36,13 @@ class UserOut(BaseModel):
     username: str
     nama_lengkap: str
     role: str
-    nomor_whatsapp: Optional[str]
+    nomor_whatsapp: str | None
     is_active: bool
     tenant_id: int
     # Info tambahan untuk info card
-    nama_jemaat: Optional[str] = None
-    nama_misi: Optional[str] = None
-    nama_uni: Optional[str] = None
+    nama_jemaat: str | None = None
+    nama_misi: str | None = None
+    nama_uni: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,7 +56,7 @@ class DeleteUserOut(BaseModel):
 
 
 class UsersListOut(BaseModel):
-    users: List[UserOut]
+    users: list[UserOut]
     count: int
 
 
@@ -91,7 +91,7 @@ def _user_to_out(user: User, db: Session) -> UserOut:
     )
 
 
-def _get_callers_misi_or_uni(caller: dict, db: Session) -> tuple[Optional[MisiKonferens], Optional[Uni]]:
+def _get_callers_misi_or_uni(caller: dict, db: Session) -> tuple[MisiKonferens | None, Uni | None]:
     """Ambil Misi/Uni yang terkait dengan caller."""
     tenant = db.query(Tenant).filter(Tenant.id == caller["tenant_id"]).first()
     if not tenant:
@@ -107,7 +107,7 @@ def _get_callers_misi_or_uni(caller: dict, db: Session) -> tuple[Optional[MisiKo
 
 @router.get("", tags=['Users'], response_model=UsersListOut)
 def list_users(
-    role: Optional[str] = None,
+    role: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):

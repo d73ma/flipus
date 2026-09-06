@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,8 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
             - reason: str (kalau NEED_REVIEW)
             - img_hash: str (untuk debug cache detection)
     """
-    # Skip kalau API key kosong atau masih placeholder
+    # Skip kalau API key kosong atau masih placeholder (pre-inference reject,
+    # TIDAK di-observe karena tidak ada inference yang terjadi).
     if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY.startswith("GANTI"):
         logger.warning("Gemini API key belum di-set, skip OCR")
         return {
@@ -78,6 +80,23 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
             "img_hash": None,
         }
 
+    # FASE 5 Sprint 2 — Prometheus histogram `flipus_ai_inference_seconds`.
+    # Wrap seluruh inference call supaya latency tercatat regardless of outcome
+    # (ok / parse_fail / unreachable / suspicious).
+    from app.core.metrics import observe_ai_inference
+
+    model_name = getattr(settings, "GEMINI_MODEL", "unknown")
+    with observe_ai_inference(provider="gemini", model=model_name) as obs:
+        return _validate_with_gemini_impl(kuitansi_payload, image_path, model_name, obs)
+
+
+def _validate_with_gemini_impl(
+    kuitansi_payload: dict,
+    image_path: str,
+    model_name: str,
+    obs,  # _OutcomeSetter dari observe_ai_inference
+) -> dict:
+    """Inner implementation of Gemini OCR — dipanggil di dalam observe_ai_inference."""
     # Compute image hash SEBELUM panggil Gemini (untuk verify cache)
     img_hash = None
     img_bytes = None
@@ -89,7 +108,6 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
     try:
         import google.generativeai as genai
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        model_name = settings.GEMINI_MODEL
         model = genai.GenerativeModel(model_name)
         logger.info(f"[OCR] img_hash={img_hash} using model={model_name}")
 
@@ -128,6 +146,7 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1:
             logger.warning(f"[OCR] img_hash={img_hash} NO_JSON_IN_RESPONSE")
+            obs.set_outcome("parse_fail")
             return {
                 "status": "NEED_REVIEW",
                 "reason": "GEMINI_PARSE_FAIL",
@@ -146,6 +165,7 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
             is_suspicious, reason = _is_suspicious_response(parsed)
 
             if x + pt > 0 and not is_suspicious:
+                obs.set_outcome("ok")
                 return {
                     "status": "VALID_MATCH",
                     "ocr": parsed,
@@ -155,6 +175,7 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
 
             # Suspect atau total nol → flag manual review
             logger.warning(f"[OCR] img_hash={img_hash} SUSPICIOUS reason={reason} ocr={parsed}")
+            obs.set_outcome("suspicious")
             return {
                 "status": "NEED_REVIEW",
                 "ocr": parsed,
@@ -164,11 +185,13 @@ def validate_with_gemini(kuitansi_payload: dict, image_path: str = None) -> dict
             }
 
         # Pure numeric validation result
+        obs.set_outcome("ok")
         parsed["img_hash"] = img_hash
         return parsed
 
     except Exception as exc:
         logger.error(f"[OCR] img_hash={img_hash} EXCEPTION: {exc}")
+        obs.set_outcome("error")
         return {
             "status": "NEED_REVIEW",
             "reason": "GEMINI_UNREACHABLE",

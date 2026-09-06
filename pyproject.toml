@@ -4,6 +4,7 @@ target-version = "py311"
 exclude = [
     ".venv",
     ".venv.broken314",
+    ".tmp_ruff",
     "_docx_preview",
     "_pdf_preview",
     "_ppt_preview",
@@ -65,6 +66,7 @@ color_output = true
 exclude = [
     ".venv",
     ".venv.broken314",
+    ".tmp_ruff",
     "frontend",
     "scripts/migrate_",
     "storage",

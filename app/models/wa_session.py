@@ -11,7 +11,7 @@ Kolom:
 - updated_at: DATETIME
 - expires_at: DATETIME NULL (TTL 30 menit)
 """
-from sqlalchemy import Column, String, DateTime, Index
+from sqlalchemy import Column, DateTime, Index, String
 from sqlalchemy.sql import func
 
 from app.core.database import Base

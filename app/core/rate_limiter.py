@@ -1,4 +1,5 @@
 """
+
 FASE 3 Sprint 1 - Rate Limiter setup (K1, K2)
 
 Menggunakan slowapi dengan in-memory storage (cukup untuk single-worker SQLite).
@@ -11,11 +12,17 @@ CATATAN PRODUKSI:
 - Dependency `limits[redis]==3.13.0` sudah ada di requirements.txt untuk ini.
 - Di-development (single-worker SQLite), in-memory storage aman dan zero-config.
 """
+
 from __future__ import annotations
+
+import logging
 
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+logger = logging.getLogger(__name__)
+
 
 
 def _key_func_by_ip(request: Request) -> str:
@@ -36,7 +43,7 @@ def _key_func_by_phone(request: Request) -> str:
         if phone:
             return f"wa:{phone}"
     except Exception:
-        pass
+        logger.exception("rate_limiter key_func gagal baca request.state.wa_from; fallback ke IP")
     return f"ip:{get_remote_address(request)}"
 
 

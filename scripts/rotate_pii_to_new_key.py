@@ -38,10 +38,10 @@ _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)
 
-from sqlalchemy import text
-from app.core.database import SessionLocal
-from app.core.security import encrypt_pii, decrypt_pii
+from sqlalchemy import text  # noqa: E402
 
+from app.core.database import SessionLocal  # noqa: E402
+from app.core.security import decrypt_pii, encrypt_pii  # noqa: E402
 
 # (table_name, column_name) — semua kolom PII yang perlu di-re-encrypt
 PII_COLUMNS = [

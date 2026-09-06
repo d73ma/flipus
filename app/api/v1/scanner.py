@@ -1,29 +1,29 @@
+import logging
 import os
-import uuid
-import shutil
 import random
 import time
+import uuid
 from datetime import datetime
-from app.core.security import utcnow
-from typing import List, Optional
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai_engine.batch_processor import process_batch
-from app.core.database import get_db
-from app.core.security import encrypt_pii
-from app.core.upload_validator import validate_amplop_ocr
 from app.api.v1.auth import get_current_user
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
+from app.core.database import get_db
+from app.core.security import encrypt_pii, utcnow
+from app.core.upload_validator import validate_amplop_ocr
 from app.models.audit import AuditLog
 from app.models.master import PersentaseConfig
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
 from app.utils.nomor_kuitansi import generate_nomor_kuitansi
 from app.utils.number_to_words import terbilang
-from app.utils.sabat_counter import get_current_sabat, get_effective_sabat_for_input
+from app.utils.sabat_counter import get_effective_sabat_for_input
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 UPLOAD_DIR = "storage/temp"
@@ -38,24 +38,24 @@ class BatchItemOut(BaseModel):
     total_pemberian_angka: int
     porsi_kantor_misi: int
     porsi_kas_jemaat: int
-    raw_total_huruf: Optional[str] = ""
-    img_hash: Optional[str] = None
-    ocr_status: Optional[str] = "NEED_REVIEW"
-    ocr_source: Optional[str] = "gemini"
-    needs_manual_review: Optional[bool] = True
+    raw_total_huruf: str | None = ""
+    img_hash: str | None = None
+    ocr_status: str | None = "NEED_REVIEW"
+    ocr_source: str | None = "gemini"
+    needs_manual_review: bool | None = True
 
 
 class BatchResultOut(BaseModel):
     total_amplop: int
     total_x_terbaca: int
     total_pt_terbaca: int
-    need_review_count: Optional[int] = 0
-    items: List[BatchItemOut]
+    need_review_count: int | None = 0
+    items: list[BatchItemOut]
 
 
 @router.post("/batch-upload", tags=['Scanner'], response_model=BatchResultOut)
 async def batch_upload(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -84,24 +84,24 @@ async def batch_upload(
 
 class OcrItemIn(BaseModel):
     """Item dari OCR review (sudah diedit Bendahara kalau perlu)."""
-    path: Optional[str] = None
-    nama_umat: Optional[str] = None
-    nomor_whatsapp: Optional[str] = None
+    path: str | None = None
+    nama_umat: str | None = None
+    nomor_whatsapp: str | None = None
     perpuluhan_x_angka: int = 0
     pt_angka: int = 0
     khusus_angka: int = 0
 
 
 class OcrBatchSaveIn(BaseModel):
-    items: List[OcrItemIn]
-    tanggal_sabat: Optional[str] = None
-    id_rekap_mingguan: Optional[str] = None
+    items: list[OcrItemIn]
+    tanggal_sabat: str | None = None
+    id_rekap_mingguan: str | None = None
     send_auto_thanks: bool = True
 
 
 class OcrSavedItem(BaseModel):
     nomor_kuitansi: str
-    nama_umat: Optional[str] = None
+    nama_umat: str | None = None
     perpuluhan_x_angka: int
     pt_angka: int
     khusus_angka: int
@@ -113,7 +113,7 @@ class OcrBatchSaveOut(BaseModel):
     status: str
     saved_count: int
     auto_thanks_count: int
-    items: List[OcrSavedItem]
+    items: list[OcrSavedItem]
 
 
 def _get_persentase(db: Session, tenant: Tenant) -> dict:
@@ -162,8 +162,6 @@ def save_ocr_batch(
     # RBAC safeguard (T67): tenant_id HARUS dari current_user, BUKAN dari payload.
     # user tidak bisa supply tenant_id lain lewat Pydantic model — tapi log here
     # supaya ada audit trail kalau ada perubahan di masa depan.
-    import logging
-    logger = logging.getLogger(__name__)
     logger.info(
         f"[OCR save-batch] user_id={current_user['id']} role={current_user['role']} "
         f"tenant_id={tenant.id} tenant_slug={tenant.slug} items_count={len(payload.items)}"
@@ -274,27 +272,27 @@ def save_ocr_batch(
             pct_khusus_uni=pct.get("pct_khusus_uni", 0.0),
         )
         pj_x, pj_pt, pj_kh = p["pj_x"], p["pj_pt"], p["pj_kh"]
-        pu_x, pu_pt, pu_kh = p["pu_x"], p["pu_pt"], p["pu_kh"]
+        pu_kh = p["pu_kh"]  # used by porsi_khusus_jemaat (Model A: jemaat + uni share)
         pm_x, pm_pt, pm_kh = p["pm_x"], p["pm_pt"], p["pm_kh"]
 
         try:
             nama_enc = encrypt_pii(item.nama_umat) if item.nama_umat else None
         except Exception as e:
-            import sys as _sys, traceback as _tb
-            print(f"[OCR] encrypt_pii(nama) failed: {e}\n{_tb.format_exc()}", file=_sys.stderr)
+            import traceback as _tb
+            logger.exception(f"[OCR] encrypt_pii(nama) failed: {e}\n{_tb.format_exc()}")
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "Gagal mengenkripsi nama umat. Hubungi admin (cek log server untuk detail).",
-            )
+            ) from e
         try:
             wa_enc = encrypt_pii(item.nomor_whatsapp) if item.nomor_whatsapp else None
         except Exception as e:
-            import sys as _sys, traceback as _tb
-            print(f"[OCR] encrypt_pii(wa) failed: {e}\n{_tb.format_exc()}", file=_sys.stderr)
+            import traceback as _tb
+            logger.exception(f"[OCR] encrypt_pii(wa) failed: {e}\n{_tb.format_exc()}")
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "Gagal mengenkripsi nomor WhatsApp. Hubungi admin (cek log server untuk detail).",
-            )
+            ) from e
 
         k = Kuitansi(
             tenant_id=tenant.id,
@@ -336,12 +334,12 @@ def save_ocr_batch(
                     _sp.rollback()
                     _insert_attempts += 1
                     if _insert_attempts > 5:
-                        import sys as _sys, traceback as _tb
-                        print(f"[OCR] IntegrityError retry exhausted (5x) for item idx={i}: {_ie}\n{_tb.format_exc()}", file=_sys.stderr)
+                        import traceback as _tb
+                        logger.exception(f"[OCR] IntegrityError retry exhausted (5x) for item idx={i}: {_ie}\n{_tb.format_exc()}")
                         raise HTTPException(
                             status.HTTP_503_SERVICE_UNAVAILABLE,
                             "Server sibuk memproses kuitansi paralel. Silakan coba ulang dalam beberapa detik.",
-                        )
+                        ) from _ie
                     # Increment urutan + jitter (10-50ms) untuk kurangi contention.
                     urutan += 1
                     base_count = urutan  # update untuk item berikutnya
@@ -363,14 +361,14 @@ def save_ocr_batch(
             try:
                 _sp.rollback()
             except Exception:
-                pass
-            import sys as _sys, traceback as _tb
-            print(f"[OCR] db insert failed: {e}\n{_tb.format_exc()}", file=_sys.stderr)
+                logger.exception("savepoint rollback gagal (nested transaction mungkin sudah closed)")
+            import traceback as _tb
+            logger.exception(f"[OCR] db insert failed: {e}\n{_tb.format_exc()}")
             db.rollback()
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 "Gagal menyimpan kuitansi ke database. Data input sudah aman di form, silakan coba ulang atau hubungi admin.",
-            )
+            ) from e
 
         auto_thanks_sent = False
         if payload.send_auto_thanks and item.nomor_whatsapp:
@@ -390,7 +388,7 @@ def save_ocr_batch(
                 if auto_thanks_sent:
                     auto_thanks_count += 1
             except Exception:
-                pass
+                logger.exception("send_auto_thanks (item) gagal, skip")
 
         saved_items.append(OcrSavedItem(
             nomor_kuitansi=nomor,

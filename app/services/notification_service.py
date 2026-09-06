@@ -14,12 +14,12 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
-from app.core.security import utcnow
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core.security import utcnow
 from app.models.notification import Notification
 
 logger = logging.getLogger(__name__)
@@ -64,12 +64,12 @@ def create_notification(
     event_type: str,
     title: str,
     message: str,
-    link: Optional[str] = None,
-    related_entity_type: Optional[str] = None,
-    related_entity_id: Optional[str] = None,
-    extra_data: Optional[dict] = None,
-    actor_user_id: Optional[int] = None,
-    icon: Optional[str] = None,
+    link: str | None = None,
+    related_entity_type: str | None = None,
+    related_entity_id: str | None = None,
+    extra_data: dict | None = None,
+    actor_user_id: int | None = None,
+    icon: str | None = None,
     commit: bool = True,
 ) -> Notification:
     """
@@ -115,11 +115,11 @@ def create_notifications_bulk(
     event_type: str,
     title: str,
     message: str,
-    link: Optional[str] = None,
-    related_entity_type: Optional[str] = None,
-    related_entity_id: Optional[str] = None,
-    extra_data: Optional[dict] = None,
-    actor_user_id: Optional[int] = None,
+    link: str | None = None,
+    related_entity_type: str | None = None,
+    related_entity_id: str | None = None,
+    extra_data: dict | None = None,
+    actor_user_id: int | None = None,
     commit: bool = True,
 ) -> list[Notification]:
     """Create notifications for multiple users at once."""

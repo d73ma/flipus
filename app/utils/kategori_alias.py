@@ -94,7 +94,6 @@ if __name__ == "__main__":
         ("", "?"),
     ]
 
-    print("=== Smart Alias Generator Self-Test ===\n")
     passed = 0
     failed = 0
     for input_nama, expected in test_cases:
@@ -104,9 +103,7 @@ if __name__ == "__main__":
             passed += 1
         else:
             failed += 1
-        print(f"  {status} '{input_nama}' → '{actual}' (expected: '{expected}')")
 
-    print(f"\n=== Result: {passed} PASS, {failed} FAIL ===")
     sys_exit_if_fail = failed > 0
 
     import sys

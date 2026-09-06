@@ -24,14 +24,12 @@ TTL: 30 menit idle → auto-reset ke IDLE
 """
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.models.wa_session import WaSession
-from app.services.wa_input_parser import parse_nominal, is_valid_nominal
-
+from app.services.wa_input_parser import is_valid_nominal, parse_nominal
 
 log = logging.getLogger("flipus.wa_input_state")
 
@@ -42,14 +40,14 @@ UNDO_WINDOW_MINUTES = 5
 MAX_STAGING_PER_DAY = 100
 
 
-def _ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
+def _ensure_aware(dt: datetime | None) -> datetime | None:
     """SQLite tidak preserve tz info, jadi expires_at dari DB bisa naive.
     Normalisasi ke UTC-aware agar comparable dengan datetime.now(timezone.utc).
     """
     if dt is None:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 # === State machine — valid transitions ===
@@ -66,11 +64,9 @@ VALID_NEXT_STATES = {
 
 def get_or_create_session(db: Session, phone: str) -> WaSession:
     """Ambil session per phone, auto-reset kalau expired."""
-    import sys as _sys
-    import traceback as _tb
     try:
         session = db.query(WaSession).filter(WaSession.phone == phone).first()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # SQLite tidak preserve tz info — pakai naive untuk assignment ke kolom DateTime.
         now_naive = now.replace(tzinfo=None)
 
@@ -95,8 +91,7 @@ def get_or_create_session(db: Session, phone: str) -> WaSession:
 
         return session
     except Exception as _e:
-        err = f"[DBG get_or_create_session] FAILED: {type(_e).__name__}: {_e}\n{_tb.format_exc()}"
-        print(err, file=_sys.stderr)
+        log.exception("wa_input_state_get_or_create_session_failed", extra={"phone": phone})
         raise
 
 
@@ -104,13 +99,13 @@ def set_state(
     db: Session,
     session: WaSession,
     new_state: str,
-    payload: Optional[dict] = None,
+    payload: dict | None = None,
 ):
     """Update state + payload + expires_at."""
     if new_state not in VALID_NEXT_STATES:
         raise ValueError(f"Invalid state: {new_state}")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # SQLite tidak preserve tz info — pakai naive untuk assignment ke kolom DateTime.
     now_naive = now.replace(tzinfo=None)
     session.state = new_state
@@ -136,7 +131,7 @@ def get_payload(session: WaSession) -> dict:
         return {}
 
 
-def parse_and_validate_nominal(text: str) -> tuple[Optional[int], str]:
+def parse_and_validate_nominal(text: str) -> tuple[int | None, str]:
     """Parse + validate nominal. Returns (value, error_msg)."""
     value = parse_nominal(text)
     valid, reason = is_valid_nominal(value)

@@ -19,21 +19,21 @@ diklasifikasikan sebagai **false positive** — tidak perlu dimigrasi ke
 `require_tenant_scope` karena akan BREAK alur public registration.
 """
 
-from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.master import Uni, MisiKonferens
+from app.models.master import MisiKonferens, Uni
+from app.models.user import User
+from app.services.notification_service import EventType, create_notification
 from app.services.user_creator import (
-    register_pendeta,
-    register_auditor,
     register_admin,
+    register_auditor,
+    register_pendeta,
 )
 from app.services.whatsapp import send_simple_message
-from app.services.notification_service import create_notification, EventType
-from app.models.user import User
 from app.utils.password_gen import mask_password
 
 router = APIRouter()
@@ -47,20 +47,20 @@ class RegisterPendetaIn(BaseModel):
     nama_jemaat: str = Field(min_length=2, max_length=120)
     initial_jemaat: str = Field(min_length=2, max_length=4, description="2-4 huruf inisial jemaat, misal 'NT' untuk Nataan")
     nama_pendeta: str = Field(min_length=2, max_length=120)
-    wa_pendeta: Optional[str] = Field(None, max_length=32)
+    wa_pendeta: str | None = Field(None, max_length=32)
     nama_ketua: str = Field(min_length=2, max_length=120)
-    wa_ketua: Optional[str] = Field(None, max_length=32)
-    nama_bendahara: Optional[str] = Field(None, max_length=120)
-    wa_bendahara: Optional[str] = Field(None, max_length=32)
+    wa_ketua: str | None = Field(None, max_length=32)
+    nama_bendahara: str | None = Field(None, max_length=120)
+    wa_bendahara: str | None = Field(None, max_length=32)
 
 
 class RegisterAuditorIn(BaseModel):
     uni_id: int
     misi_konferens_id: int
     nama_bendahara_misi: str = Field(min_length=2, max_length=120)
-    wa_bendahara_misi: Optional[str] = Field(None, max_length=32)
+    wa_bendahara_misi: str | None = Field(None, max_length=32)
     nama_auditor: str = Field(min_length=2, max_length=120)
-    wa_auditor: Optional[str] = Field(None, max_length=32)
+    wa_auditor: str | None = Field(None, max_length=32)
     # Persentase Jemaat→Misi
     pct_x_jemaat: float = Field(default=1.0, ge=0.0, le=1.0)
     pct_pt_jemaat: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -70,9 +70,9 @@ class RegisterAuditorIn(BaseModel):
 class RegisterAdminIn(BaseModel):
     uni_id: int
     nama_bendahara_uni: str = Field(min_length=2, max_length=120)
-    wa_bendahara_uni: Optional[str] = Field(None, max_length=32)
+    wa_bendahara_uni: str | None = Field(None, max_length=32)
     nama_admin_uni: str = Field(min_length=2, max_length=120)
-    wa_admin_uni: Optional[str] = Field(None, max_length=32)
+    wa_admin_uni: str | None = Field(None, max_length=32)
     # Persentase Misi→Uni
     pct_x_uni: float = Field(default=0.0, ge=0.0, le=1.0)
     pct_pt_uni: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -86,7 +86,7 @@ class CredentialsOut(BaseModel):
     username: str
     password: str  # plain — hanya muncul sekali
     password_masked: str
-    nomor_wa_target: Optional[str]
+    nomor_wa_target: str | None
     wa_sent: bool
 
 
@@ -127,7 +127,7 @@ class RegisterAdminOut(BaseModel):
 
 # ===== HELPERS =====
 
-def _send_credentials_wa(phone: Optional[str], username: str, password: str, role_label: str, unit_name: str) -> bool:
+def _send_credentials_wa(phone: str | None, username: str, password: str, role_label: str, unit_name: str) -> bool:
     """Kirim kredensial via Fonnte. Return True kalau sent (atau mock-skipped karena WHATSAPP_ENABLED=false)."""
     if not phone:
         return False
@@ -193,7 +193,7 @@ def register_pendeta_endpoint(payload: RegisterPendetaIn, db: Session = Depends(
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal membuat akun: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Gagal membuat akun: {e}') from e
 
     wa_sent = _send_credentials_wa(
         payload.wa_pendeta, user.username, plain_password,
@@ -271,7 +271,7 @@ def register_auditor_endpoint(payload: RegisterAuditorIn, db: Session = Depends(
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal membuat akun: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Gagal membuat akun: {e}') from e
 
     wa_sent = _send_credentials_wa(
         payload.wa_auditor, user.username, plain_password,
@@ -354,7 +354,7 @@ def register_admin_endpoint(payload: RegisterAdminIn, db: Session = Depends(get_
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal membuat akun: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f'Gagal membuat akun: {e}') from e
 
     wa_sent = _send_credentials_wa(
         payload.wa_admin_uni, user.username, plain_password,
@@ -391,7 +391,7 @@ def register_admin_endpoint(payload: RegisterAdminIn, db: Session = Depends(get_
     from app.models.tenant import Tenant
     tenant = db.query(Tenant).filter(
         Tenant.nama_uni == uni.nama_resmi,
-        Tenant.misi_konferens_id == None,
+        Tenant.misi_konferens_id.is_(None),
     ).first()
 
     return RegisterAdminOut(

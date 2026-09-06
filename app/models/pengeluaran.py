@@ -17,7 +17,8 @@ Status workflow:
 
 Nomor pengeluaran: OUT-{YYYYMMDD}-{seq3} auto-generated per tenant per hari
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, BigInteger, Boolean, Index, func, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, func
+
 from app.core.database import Base
 
 

@@ -12,8 +12,6 @@ B. WA Bot (chat single-step via /api/v1/wa/pengeluaran/inbound)
 Usage:
     .venv/bin/python3 scripts/smoke_pengeluaran_m6.py
 """
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -45,10 +43,10 @@ def main():
     print("=" * 70)
 
     bendahara_tok = login(*CREDS["bendahara_a"])
-    print(f"\n[A] Login Bendahara OK")
+    print("\n[A] Login Bendahara OK")
 
     # === Test A1: OCR upload (fallback ke NEED_REVIEW karena .txt bukan gambar) ===
-    print(f"\n[A1] OCR batch-upload dengan fixture .txt (expect NEED_REVIEW)...")
+    print("\n[A1] OCR batch-upload dengan fixture .txt (expect NEED_REVIEW)...")
     nota_files = []
     for fname in ["nota_pln_250k.txt", "nota_pdam_180k.txt", "nota_telkom_200k.txt"]:
         path = FIXTURE_DIR / "m6_nota" / fname
@@ -70,21 +68,21 @@ def main():
     if len(items) != 3:
         print(f"  ❌ Expected 3 items, got {len(items)}")
         return
-    print(f"  ✅ 3 nota uploaded (Ollama fallback: NEED_REVIEW)")
+    print("  ✅ 3 nota uploaded (Ollama fallback: NEED_REVIEW)")
 
     # === Test A2: List kategori pengeluaran ===
-    print(f"\n[A2] List kategori (Bendahara ambil id Listrik untuk save manual)...")
+    print("\n[A2] List kategori (Bendahara ambil id Listrik untuk save manual)...")
     r = requests.get(f"{BASE_URL}/kategori-pengeluaran/list", headers=auth_headers(bendahara_tok), timeout=10)
     r.raise_for_status()
     kats = r.json()
     listrik = next((k for k in kats if k["alias"] == "LIS"), None)
     if not listrik:
-        print(f"  ❌ Listrik (LIS) not found")
+        print("  ❌ Listrik (LIS) not found")
         return
     print(f"  ✅ Listrik id={listrik['id']}, is_rutin={listrik['is_rutin']}")
 
     # === Test A3: Save OCR result as draft (manual review) ===
-    print(f"\n[A3] Bendahara review OCR → save as draft Listrik Rp 250k...")
+    print("\n[A3] Bendahara review OCR → save as draft Listrik Rp 250k...")
     first_item = items[0]
     save_body = {
         "path": first_item["path"],
@@ -104,7 +102,7 @@ def main():
     print(f"  ✅ saved_id={saved['saved_id']} nomor={saved['nomor_pengeluaran']} rutin={saved['is_rutin']}")
 
     # === Test B1: WA chat rutin ===
-    print(f"\n[B1] WA Bot — chat rutin (listrik, auto-approve)...")
+    print("\n[B1] WA Bot — chat rutin (listrik, auto-approve)...")
     # Sender: Jerry's real number (updated by update_bendahara_wa.py to 628124809145)
     sender = "628124809145"  # Bendahara_a phone (sesuai update_bendahara_wa.py default)
     wa_messages = ["keluar", "250000", "PLN", "LIS", "ya"]
@@ -125,10 +123,10 @@ def main():
     if wa_saved:
         print(f"  ✅ WA Pengeluaran saved: id={wa_saved['id']} nomor={wa_saved['nomor_pengeluaran']} status={wa_saved['status']}")
     else:
-        print(f"  ❌ WA Pengeluaran not found in approved list")
+        print("  ❌ WA Pengeluaran not found in approved list")
 
     # === Test B2: WA chat non-rutin (Pembangunan) → pending ===
-    print(f"\n[B2] WA Bot — chat non-rutin (Pembangunan → pending_approval)...")
+    print("\n[B2] WA Bot — chat non-rutin (Pembangunan → pending_approval)...")
     # Create Pembangunan category first if not exists
     pembangunan = next((k for k in kats if k["alias"] == "PBG" or "pembangunan" in k["nama"].lower()), None)
     if not pembangunan:
@@ -166,10 +164,10 @@ def main():
     if wa_pending:
         print(f"  ✅ WA Pengeluaran pending: id={wa_pending['id']} status={wa_pending['status']}")
     else:
-        print(f"  ❌ WA Pengeluaran pending not found")
+        print("  ❌ WA Pengeluaran pending not found")
 
     # === Test B3: Cancel flow ===
-    print(f"\n[B3] WA Bot — cancel flow (batal)...")
+    print("\n[B3] WA Bot — cancel flow (batal)...")
     requests.post(f"{BASE_URL}/wa/pengeluaran/reset", json={"phone": sender}, timeout=10)
     wa_messages = ["keluar", "50000", "batal"]
     for i, msg in enumerate(wa_messages):
@@ -177,13 +175,13 @@ def main():
         r = requests.post(f"{BASE_URL}/wa/pengeluaran/inbound", json=body, timeout=10)
         result = r.json()
         print(f"  step {i+1} '{msg}' → state={result.get('state', result.get('status'))}")
-    print(f"  ✅ Cancel flow completed without saving")
+    print("  ✅ Cancel flow completed without saving")
 
     # === Summary ===
     print("\n" + "=" * 70)
-    print(f"  ✅ v2.0 M6 SMOKE TEST COMPLETE")
-    print(f"     • OCR: 3 nota uploaded (NEED_REVIEW fallback), 1 saved as draft")
-    print(f"     • WA Bot: 1 rutin auto-approved + 1 non-rutin pending + 1 cancelled")
+    print("  ✅ v2.0 M6 SMOKE TEST COMPLETE")
+    print("     • OCR: 3 nota uploaded (NEED_REVIEW fallback), 1 saved as draft")
+    print("     • WA Bot: 1 rutin auto-approved + 1 non-rutin pending + 1 cancelled")
     print("=" * 70)
 
 

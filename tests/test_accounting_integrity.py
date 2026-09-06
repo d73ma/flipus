@@ -15,8 +15,8 @@ Berlaku untuk SEMUA call site (dashboard, scanner, wa_input, quick_input, agrega
 """
 
 import pytest
-from app.utils.porsi_calculator import compute_porsi, validate_porsi_constraint
 
+from app.utils.porsi_calculator import compute_porsi, validate_porsi_constraint
 
 # ---------------------------------------------------------------------------
 # 1. Conservation of money
@@ -241,8 +241,8 @@ class TestRounding:
         # Truncate: int(333 * 0.5) = 166
         # round: round(333 * 0.5) = 166
         # Untuk 333 → identik. Test ini memastikan tidak ada drift.
-        old_value = int(333 * 0.5)
-        new_value = round(333 * 0.5)
+        int(333 * 0.5)
+        round(333 * 0.5)
         # Untuk angka dengan .5 persis, keduanya menghasilkan 166 (Python).
         # Untuk 335 → int(335*0.5)=167, round(335*0.5)=168
         r = compute_porsi(
@@ -262,21 +262,21 @@ class TestIdempotency:
     """compute_porsi() deterministik — 2x panggil hasil sama."""
 
     def test_double_call_same_result(self):
-        args = dict(
-            x=797_500, pt=315_000, kh=200_000,
-            pct_x_jemaat=0.0, pct_pt_jemaat=0.5, pct_khusus_jemaat=0.0,
-            pct_x_uni=0.41, pct_pt_uni=0.30, pct_khusus_uni=0.0,
-        )
+        args = {
+            "x": 797_500, "pt": 315_000, "kh": 200_000,
+            "pct_x_jemaat": 0.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.41, "pct_pt_uni": 0.30, "pct_khusus_uni": 0.0,
+        }
         r1 = compute_porsi(**args)
         r2 = compute_porsi(**args)
         assert r1 == r2
 
     def test_no_side_effects(self):
         """compute_porsi() tidak boleh modify input args."""
-        pct = dict(
-            pct_x_jemaat=0.0, pct_pt_jemaat=0.5, pct_khusus_jemaat=0.0,
-            pct_x_uni=0.41, pct_pt_uni=0.30, pct_khusus_uni=0.0,
-        )
+        pct = {
+            "pct_x_jemaat": 0.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.41, "pct_pt_uni": 0.30, "pct_khusus_uni": 0.0,
+        }
         pct_snapshot = dict(pct)
         compute_porsi(x=100, pt=100, kh=100, **pct)
         assert pct == pct_snapshot
@@ -298,46 +298,46 @@ class TestRecomputeSingleContract:
     def test_idempotent_recompute_yields_no_change(self):
         """Kalau config dan nominal tetap, recompute ulang → changed=False."""
         from app.utils.porsi_calculator import compute_porsi
-        cfg = dict(
-            pct_x_jemaat=0.0, pct_pt_jemaat=0.5, pct_khusus_jemaat=0.0,
-            pct_x_uni=0.41, pct_pt_uni=0.30, pct_khusus_uni=0.0,
-        )
+        cfg = {
+            "pct_x_jemaat": 0.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.41, "pct_pt_uni": 0.30, "pct_khusus_uni": 0.0,
+        }
         x, pt, kh = 797_500, 315_000, 200_000
         r1 = compute_porsi(x=x, pt=pt, kh=kh, **cfg)
         # Pakai hasil pertama sebagai "before", recompute sebagai "after"
-        before = dict(
-            porsi_kantor_misi=r1["pm_x"] + r1["pm_pt"] + r1["pm_kh"],
-            porsi_kas_jemaat=r1["pj_x"] + r1["pj_pt"] + r1["pj_kh"],
-            porsi_khusus_misi=r1["pm_kh"],
-            porsi_khusus_jemaat=r1["pj_kh"],
-            porsi_x_uni=r1["pu_x"],
-            porsi_pt_uni=r1["pu_pt"],
-            porsi_khusus_uni=r1["pu_kh"],
-        )
+        before = {
+            "porsi_kantor_misi": r1["pm_x"] + r1["pm_pt"] + r1["pm_kh"],
+            "porsi_kas_jemaat": r1["pj_x"] + r1["pj_pt"] + r1["pj_kh"],
+            "porsi_khusus_misi": r1["pm_kh"],
+            "porsi_khusus_jemaat": r1["pj_kh"],
+            "porsi_x_uni": r1["pu_x"],
+            "porsi_pt_uni": r1["pu_pt"],
+            "porsi_khusus_uni": r1["pu_kh"],
+        }
         r2 = compute_porsi(x=x, pt=pt, kh=kh, **cfg)
-        after = dict(
-            porsi_kantor_misi=r2["pm_x"] + r2["pm_pt"] + r2["pm_kh"],
-            porsi_kas_jemaat=r2["pj_x"] + r2["pj_pt"] + r2["pj_kh"],
-            porsi_khusus_misi=r2["pm_kh"],
-            porsi_khusus_jemaat=r2["pj_kh"],
-            porsi_x_uni=r2["pu_x"],
-            porsi_pt_uni=r2["pu_pt"],
-            porsi_khusus_uni=r2["pu_kh"],
-        )
+        after = {
+            "porsi_kantor_misi": r2["pm_x"] + r2["pm_pt"] + r2["pm_kh"],
+            "porsi_kas_jemaat": r2["pj_x"] + r2["pj_pt"] + r2["pj_kh"],
+            "porsi_khusus_misi": r2["pm_kh"],
+            "porsi_khusus_jemaat": r2["pj_kh"],
+            "porsi_x_uni": r2["pu_x"],
+            "porsi_pt_uni": r2["pu_pt"],
+            "porsi_khusus_uni": r2["pu_kh"],
+        }
         assert before == after, f"Recompute harus idempotent: before={before}, after={after}"
 
     def test_recompute_changes_when_config_changes(self):
         """Kalau config berubah, recompute menghasilkan angka berbeda."""
         from app.utils.porsi_calculator import compute_porsi
         x, pt, kh = 100_000, 50_000, 25_000
-        cfg_old = dict(
-            pct_x_jemaat=0.0, pct_pt_jemaat=0.5, pct_khusus_jemaat=0.0,
-            pct_x_uni=0.41, pct_pt_uni=0.30, pct_khusus_uni=0.0,
-        )
-        cfg_new = dict(
-            pct_x_jemaat=0.0, pct_pt_jemaat=0.6, pct_khusus_jemaat=0.0,
-            pct_x_uni=0.41, pct_pt_uni=0.30, pct_khusus_uni=0.0,
-        )
+        cfg_old = {
+            "pct_x_jemaat": 0.0, "pct_pt_jemaat": 0.5, "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.41, "pct_pt_uni": 0.30, "pct_khusus_uni": 0.0,
+        }
+        cfg_new = {
+            "pct_x_jemaat": 0.0, "pct_pt_jemaat": 0.6, "pct_khusus_jemaat": 0.0,
+            "pct_x_uni": 0.41, "pct_pt_uni": 0.30, "pct_khusus_uni": 0.0,
+        }
         r_old = compute_porsi(x=x, pt=pt, kh=kh, **cfg_old)
         r_new = compute_porsi(x=x, pt=pt, kh=kh, **cfg_new)
         # Perubahan pct_pt_jemaat dari 0.5 → 0.6 HARUS mempengaruhi pj_pt
@@ -371,12 +371,12 @@ class TestRecomputeSingleContract:
         ]
         # Simulasi payload_hash (struktur harus lengkap)
         sample_hash = (
-            f"kuitansi_id=42|user_id=1|role=ADMIN_UNI|"
-            f"before={{...}}|after={{...}}|"
-            f"config_source=PersentaseConfig.id=5|config_id=5|"
-            f"pct_x_j=0.0,pct_pt_j=0.5,pct_kh_j=0.0,"
-            f"pct_x_u=0.41,pct_pt_u=0.30,pct_kh_u=0.0|"
-            f"changed=False"
+            "kuitansi_id=42|user_id=1|role=ADMIN_UNI|"
+            "before={...}|after={...}|"
+            "config_source=PersentaseConfig.id=5|config_id=5|"
+            "pct_x_j=0.0,pct_pt_j=0.5,pct_kh_j=0.0,"
+            "pct_x_u=0.41,pct_pt_u=0.30,pct_kh_u=0.0|"
+            "changed=False"
         )
         for field in expected_fields:
             assert field in sample_hash, f"Audit log harus punya field {field!r}"

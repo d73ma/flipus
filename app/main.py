@@ -1,16 +1,16 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-import os
-import sys as _sys_startup
-
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.rate_limiter import limiter as _rate_limiter
+
 # FASE 3-S3.S1 — centralized JSON structured logging + request context
 from app.core.logger import setup_logging as _setup_logging
+from app.core.rate_limiter import limiter as _rate_limiter
 from app.core.request_context import RequestContextMiddleware
 
 # Configure root logger BEFORE app apapun emit log line — supaya even
@@ -18,7 +18,31 @@ from app.core.request_context import RequestContextMiddleware
 # Level di-resolve dari settings.LOG_LEVEL (env-overridable).
 _setup_logging(level=settings.LOG_LEVEL)
 
-from app.api.v1 import auth, onboarding, scanner, reports, sync, dashboard, register, master, users, admin, agregat, tenants, kuitansi, twofa, notifications, demo, wa_input, quick_input, pengeluaran, pengeluaran_ocr, pengeluaran_wa, laporan_gabungan, m8_managed
+from app.api.v1 import (  # noqa: E402
+    admin,
+    agregat,
+    auth,
+    dashboard,
+    demo,
+    kuitansi,
+    laporan_gabungan,
+    m8_managed,
+    master,
+    notifications,
+    onboarding,
+    pengeluaran,
+    pengeluaran_ocr,
+    pengeluaran_wa,
+    quick_input,
+    register,
+    reports,
+    scanner,
+    sync,
+    tenants,
+    twofa,
+    users,
+    wa_input,
+)
 
 app = FastAPI(
     title="FLIPUS v1.3 — UKIKT",
@@ -114,7 +138,8 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 # FASE 3-S3.S1 — startup logger (JSONFormatter handles output).
 # Defined BEFORE CORS block supaya CORS log bisa di-emit.
-import logging as _logging_startup
+import logging as _logging_startup  # noqa: E402
+
 _startup_log = _logging_startup.getLogger("app.startup")
 
 # FASE 3-S3.S3 — CORS origins fully env-driven via ALLOWED_ORIGINS.
@@ -190,7 +215,8 @@ else:
     _startup_log.info("static_mounted path=/storage dir=%s already_exists=False created_now=True", _STORAGE_DIR)
 
 # === Start scheduler (background) ===
-from app.services.reset_scheduler import start_scheduler
+from app.services.reset_scheduler import start_scheduler  # noqa: E402
+
 try:
     reset_scheduler = start_scheduler()
 except Exception as _sched_exc:
@@ -200,7 +226,8 @@ except Exception as _sched_exc:
 # Beberapa tabel (sync_outbox dll) mungkin belum ter-create kalau
 # schema migration belum dijalankan. Kita create_all() di startup supaya
 # endpoint /v1/sync/* tidak crash. Aman kalau tabel sudah ada (SQLAlchemy no-op).
-from app.core.database import Base, engine
+from app.core.database import Base, engine  # noqa: E402
+
 try:
     Base.metadata.create_all(bind=engine)
     _startup_log.info("create_all_ok")
@@ -221,3 +248,40 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "1.1.0"}
+
+
+# === FASE 5 Sprint 2 — Prometheus /metrics endpoint ===
+# Di-expose di path /metrics (default Prometheus convention, scrape config friendly).
+# Tidak di-behind auth supaya Prometheus scrape tidak butuh JWT — tapi
+# bisa di-restrict via nginx / firewall ke internal network only.
+# Excluded dari instrumentator middleware sendiri supaya tidak double-count.
+#
+# CRITICAL: pass `registry=REGISTRY` (custom registry from app.core.metrics)
+# to the Instrumentator constructor. Without this, Instrumentator falls back
+# to prometheus_client's DEFAULT registry and our 4 custom `flipus_*` metrics
+# (registered on our own CollectorRegistry) would be invisible in /metrics.
+# This keeps ONE scrape surface for HTTP auto-metrics + business metrics.
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    from app.core.metrics import REGISTRY as _flipus_metrics_registry
+    Instrumentator(
+        should_group_status_codes=False,
+        should_ignore_untemplated=True,
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=True,
+        excluded_handlers=["/metrics", "/health", "/docs", "/openapi.json", "/redoc"],
+        registry=_flipus_metrics_registry,
+    ).instrument(app).expose(
+        app,
+        endpoint="/metrics",
+        include_in_schema=False,  # jangan muncul di OpenAPI docs
+        tags=["Observability"],
+    )
+    _startup_log.info("metrics_endpoint_exposed path=/metrics registry=custom")
+except Exception as _metrics_exc:
+    # Observability harus TIDAK block startup. Log & continue.
+    _startup_log.warning(
+        "metrics_endpoint_failed exc=%s msg=%s",
+        type(_metrics_exc).__name__, _metrics_exc,
+    )

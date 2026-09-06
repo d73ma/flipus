@@ -15,12 +15,11 @@ Parser nominal Indonesia untuk WA Input Bot (T94):
 MAX_NOMINAL = 100 juta.
 """
 
-import pytest
 
 from app.services.wa_input_parser import (
-    parse_nominal,
-    is_valid_nominal,
     MAX_NOMINAL,
+    is_valid_nominal,
+    parse_nominal,
 )
 
 

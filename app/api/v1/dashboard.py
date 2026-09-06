@@ -1,4 +1,5 @@
 """
+
 FLIPUS v1.1 — Dashboard helper endpoints + Kuitansi submit.
 
 Endpoint:
@@ -7,28 +8,31 @@ Endpoint:
               + auto-thanks WA kalau ada nomor (non-blocking)
 """
 
+
+import logging
 from datetime import datetime
-from app.core.security import utcnow
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.core.security import encrypt_pii, decrypt_pii
-from app.core.tenant_scope import (
-    TenantScope, require_tenant_scope,
-)
 from app.api.v1.auth import get_current_user
-from app.utils.sabat_counter import get_current_sabat, get_sabat_info, get_effective_sabat_for_input
-from app.utils.nomor_kuitansi import generate_nomor_kuitansi, generate_id_rekap_mingguan
-from app.utils.number_to_words import terbilang
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
+from app.core.database import get_db
+from app.core.security import decrypt_pii, encrypt_pii, utcnow
+from app.core.tenant_scope import (
+    TenantScope,
+    require_tenant_scope,
+)
 from app.models.audit import AuditLog
 from app.models.master import PersentaseConfig
-from app.services.notification_service import create_notification, EventType
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.services.notification_service import EventType, create_notification
+from app.utils.nomor_kuitansi import generate_id_rekap_mingguan, generate_nomor_kuitansi
+from app.utils.number_to_words import terbilang
+from app.utils.sabat_counter import get_current_sabat, get_effective_sabat_for_input, get_sabat_info
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -59,14 +63,14 @@ def sabat_info(
 
 class KuitansiIn(BaseModel):
     """Schema untuk Bendahara create kuitansi (manual atau dari OCR)."""
-    nama_umat: Optional[str] = Field(None, description="Nama pemberi (optional, akan dienkripsi)")
-    nomor_whatsapp: Optional[str] = Field(None, description="WA pemberi (optional, akan dienkripsi + auto-thanks)")
+    nama_umat: str | None = Field(None, description="Nama pemberi (optional, akan dienkripsi)")
+    nomor_whatsapp: str | None = Field(None, description="WA pemberi (optional, akan dienkripsi + auto-thanks)")
     perpuluhan_x_angka: int = Field(default=0, ge=0)
     pt_angka: int = Field(default=0, ge=0)
     khusus_angka: int = Field(default=0, ge=0)
-    tanggal_sabat: Optional[str] = Field(None, description="ISO date, default = sabat-info terbaru")
-    id_rekap_mingguan: Optional[str] = Field(None, description="default auto-generated")
-    foto_amplop_path: Optional[str] = None
+    tanggal_sabat: str | None = Field(None, description="ISO date, default = sabat-info terbaru")
+    id_rekap_mingguan: str | None = Field(None, description="default auto-generated")
+    foto_amplop_path: str | None = None
 
 
 class KuitansiOut(BaseModel):
@@ -87,7 +91,7 @@ class KuitansiOut(BaseModel):
     status: str = "finalized"
     needs_approval: bool = False  # True kalau draft, butuh Ketua approval
     auto_thanks_sent: bool = False
-    auto_thanks_target: Optional[str] = None
+    auto_thanks_target: str | None = None
 
 
 def _get_persentase_for_tenant(db: Session, tenant: Tenant) -> dict:
@@ -189,7 +193,7 @@ def create_kuitansi(
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == tenant.id)
         .filter(Kuitansi.tanggal_sabat == tanggal_sabat)
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .count()
     )
     urutan = existing_count + 1
@@ -294,7 +298,7 @@ def create_kuitansi(
             auto_thanks_sent = isinstance(resp, dict) and resp.get("status") == "sent"
         except Exception:
             # Silent fail — audit log only
-            pass
+            logger.exception("send_auto_thanks gagal (auto-thanks), audit log only")
 
     # Audit log
     db.add(AuditLog(
@@ -320,7 +324,7 @@ def create_kuitansi(
                 user_id=ketua.id,
                 tenant_id=tenant.id,
                 event_type=EventType.KUITANSI_DRAFT_CREATED,
-                title=f"Kuitansi baru menunggu approval",
+                title="Kuitansi baru menunggu approval",
                 message=f"Bendahara membuat draft kuitansi {nomor_kuitansi} (Rp {total_pemberian:,}) untuk {tanggal_sabat}",
                 link="/ketua",
                 related_entity_type="kuitansi",
@@ -361,19 +365,19 @@ def create_kuitansi(
 
 class ApprovalActionIn(BaseModel):
     """Schema untuk approve/reject."""
-    reason: Optional[str] = Field(None, max_length=500, description="Required untuk reject")
+    reason: str | None = Field(None, max_length=500, description="Required untuk reject")
 
 
 class KuitansiApprovalOut(BaseModel):
     id: int
     nomor_kuitansi: str
     status: str
-    approved_by_user_id: Optional[int] = None
-    approved_at: Optional[str] = None
-    rejected_by_user_id: Optional[int] = None
-    rejected_at: Optional[str] = None
-    rejected_reason: Optional[str] = None
-    created_by_user_id: Optional[int] = None
+    approved_by_user_id: int | None = None
+    approved_at: str | None = None
+    rejected_by_user_id: int | None = None
+    rejected_at: str | None = None
+    rejected_reason: str | None = None
+    created_by_user_id: int | None = None
     total_pemberian_angka: int
     tanggal_sabat: str
 
@@ -453,7 +457,7 @@ def approve_kuitansi(
             )
         except Exception:
             # Silent fail — audit log only
-            pass
+            logger.exception("send_auto_thanks gagal (notif), audit log only")
 
     # Audit log
     db.add(AuditLog(
@@ -483,8 +487,9 @@ def approve_kuitansi(
             commit=False,
         )
         # Also notify all ADMIN_UNI in the same uni
+        from app.models.master import MisiKonferens, Uni
         from app.models.user import User
-        from app.models.master import Uni, MisiKonferens
+
         k_tenant_for_admin = db.query(Tenant).filter(Tenant.id == k.tenant_id).first()
         if k_tenant_for_admin and k_tenant_for_admin.nama_uni:
             uni = db.query(Uni).filter(Uni.nama_resmi == k_tenant_for_admin.nama_uni).first()
@@ -648,7 +653,7 @@ def list_pending_kuitansi(
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.status == "draft")
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .order_by(Kuitansi.created_at.desc())
     )
 
@@ -695,7 +700,7 @@ def list_rejected_kuitansi(
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
         .filter(Kuitansi.status == "rejected")
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .order_by(Kuitansi.rejected_at.desc())
     )
 

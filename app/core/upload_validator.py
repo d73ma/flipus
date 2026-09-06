@@ -18,7 +18,7 @@ tenant (use case terbatas) dan direstart dari path lain tanpa dieksekusi
 oleh backend. Untuk OCR/amplop, SVG TIDAK termasuk whitelist.
 """
 import os
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from fastapi import HTTPException, status
 
@@ -79,7 +79,7 @@ def _check_filetype_available() -> None:
         )
 
 
-def _ext(filename: Optional[str]) -> str:
+def _ext(filename: str | None) -> str:
     return os.path.splitext(filename or "")[1].lower() if filename else ""
 
 
@@ -90,7 +90,7 @@ def _raise_bad_request(detail: str) -> None:
 def validate_upload(
     *,
     content: bytes,
-    filename: Optional[str],
+    filename: str | None,
     allowed_mimes: Iterable[str],
     allowed_exts: Iterable[str],
     max_bytes: int,
@@ -167,7 +167,7 @@ def validate_upload(
 
 # ===== Preset per use-case =====
 
-def validate_amplop_ocr(content: bytes, filename: Optional[str]) -> str:
+def validate_amplop_ocr(content: bytes, filename: str | None) -> str:
     """Validate foto amplop kuitansi (OCR scanner)."""
     return validate_upload(
         content=content,
@@ -179,7 +179,7 @@ def validate_amplop_ocr(content: bytes, filename: Optional[str]) -> str:
     )
 
 
-def validate_struk_ocr(content: bytes, filename: Optional[str]) -> str:
+def validate_struk_ocr(content: bytes, filename: str | None) -> str:
     """Validate foto struk nota (OCR pengeluaran)."""
     return validate_upload(
         content=content,
@@ -191,7 +191,7 @@ def validate_struk_ocr(content: bytes, filename: Optional[str]) -> str:
     )
 
 
-def validate_logo(content: bytes, filename: Optional[str]) -> str:
+def validate_logo(content: bytes, filename: str | None) -> str:
     """Validate logo tenant."""
     return validate_upload(
         content=content,

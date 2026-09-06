@@ -1,4 +1,5 @@
 """
+
 FLIPUS v1.1 — Auto-reset scheduler.
 
 Tugas: deteksi "Sabat pertama di bulan Januari" → trigger reset counter urutan.
@@ -11,16 +12,18 @@ Jalankan: scheduler.start() dari app/main.py saat startup, atau sebagai
 standalone script: `python -m app.services.reset_scheduler`
 """
 
-from datetime import datetime, timedelta
-from typing import Optional
+
+import logging
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.utils.sabat_counter import get_sabat_info
-from app.services.whatsapp import send_simple_message
 from app.services import backup_service
-from app.core.config import settings
+from app.services.whatsapp import send_simple_message
+from app.utils.sabat_counter import get_sabat_info
+
+logger = logging.getLogger(__name__)
 
 
 def _is_first_saturday_of_january(tgl: datetime) -> bool:
@@ -61,9 +64,8 @@ def reset_counter_sequences():
     try:
         send_simple_message(jerry_wa, msg)
     except Exception:
-        pass
+        logger.exception("send_simple_message (reset notif ke jerry) gagal")
 
-    print(f"[RESET SCHEDULER] {msg}")
 
 
 def start_scheduler():
@@ -105,7 +107,6 @@ def start_scheduler():
     )
 
     scheduler.start()
-    print("[SCHEDULER] Started — backup 02:00, reset Sat 08:00, notif cleanup 03:00 UTC")
     return scheduler
 
 
@@ -115,17 +116,18 @@ def cleanup_notifications_daily():
     Called by APScheduler. Retention default: 90 days (configurable via env).
     """
     import os
+
     from app.core.database import SessionLocal
     from app.services.notification_service import cleanup_old_notifications
+
 
     retention_days = int(os.getenv("NOTIFICATION_RETENTION_DAYS", "90"))
 
     db = SessionLocal()
     try:
-        deleted = cleanup_old_notifications(db, retention_days=retention_days)
-        print(f"[NOTIFICATION CLEANUP] Deleted {deleted} notifications (>{retention_days} days)")
-    except Exception as e:
-        print(f"[NOTIFICATION CLEANUP] Error: {e}")
+        cleanup_old_notifications(db, retention_days=retention_days)
+    except Exception:
+        logger.exception("cleanup_old_notifications gagal; skip tick ini")
     finally:
         db.close()
 
@@ -134,7 +136,6 @@ def cleanup_notifications_daily():
 
 def trigger_reset_now():
     """Trigger reset langsung (untuk testing atau recovery oleh Jerry)."""
-    print("[MANUAL RESET] Triggered")
     reset_counter_sequences()
 
 
@@ -151,7 +152,6 @@ def auto_backup_daily():
     """
     try:
         result = backup_service.backup_database(retention=7)
-        print(f"[AUTO-BACKUP] {result['filename']} ({result['size_bytes']:,} bytes)")
         return result
     except Exception as e:
         # Notifikasi Jerry kalau gagal
@@ -160,18 +160,15 @@ def auto_backup_daily():
         try:
             send_simple_message(jerry_wa, msg)
         except Exception:
-            pass
-        print(f"[AUTO-BACKUP] GAGAL: {e}")
+            logger.exception("send_simple_message (auto-backup gagal notif) gagal")
         raise
 
 
 def trigger_backup_now():
     """Trigger backup langsung (untuk testing atau recovery)."""
-    print("[MANUAL BACKUP] Triggered")
     return auto_backup_daily()
 
 
 if __name__ == "__main__":
     # Standalone: jalan sebagai script
-    print("=== Reset Scheduler — Manual Run ===")
     trigger_reset_now()

@@ -11,11 +11,11 @@ Skenario:
 8. Cari Pengeluaran approved → POST void → 403 (locked)
 9. Verify audit log via DB query
 """
-import sys
-import sqlite3
-import requests
-import json
 import os
+import sqlite3
+import sys
+
+import requests
 
 BASE = os.environ.get("FLIPUS_BASE", "http://localhost:8000")
 DB_PATH = os.environ.get("FLIPUS_DB", "flipus_local.db")
@@ -338,7 +338,7 @@ print("SUMMARY")
 print("=" * 60)
 passed = sum(1 for _, ok, _ in results if ok)
 total = len(results)
-for name, ok, msg in results:
+for name, ok, _msg in results:
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
 print(f"\n>>> {passed}/{total} PASS")
 sys.exit(0 if passed == total else 1)

@@ -8,8 +8,8 @@ Run:
     .venv/bin/python3 -m pytest tests/test_t23_approval_2fa.py -v
 """
 
+
 import pytest
-import os
 
 # pyotp is required for TOTP tests. Skip gracefully if not installed (CI may not have it).
 pyotp = pytest.importorskip("pyotp", reason="pyotp not available")

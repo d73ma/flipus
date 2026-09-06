@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, BigInteger, Boolean, Index, func
-from sqlalchemy.orm import relationship
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, func
+
 from app.core.database import Base
+
 
 class Kuitansi(Base):
     __tablename__ = "kuitansi"

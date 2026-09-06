@@ -5,10 +5,10 @@ Usage:
   Terminal A: cd /Users/jerrymauri/Flipus && .venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
   Terminal B: .venv/bin/python3 /tmp/test_quick_input.py
 """
-import sys
 import json
-import urllib.request
+import sys
 import urllib.error
+import urllib.request
 
 BASE = "http://localhost:8000"
 
@@ -88,7 +88,8 @@ if status != 200:
 
 # Step 5: Verify kategori baru sudah ter-create di DB
 print("\n[5] Verify kategori baru ada di DB...")
-import sqlite3
+import sqlite3  # noqa: E402
+
 db = sqlite3.connect("/Users/jerrymauri/Flipus/flipus_local.db")
 kat = db.execute("SELECT id, nama, alias, is_rutin FROM kategori_pemasukan WHERE tenant_id = ? ORDER BY id",
                  (tenant_id,)).fetchall()

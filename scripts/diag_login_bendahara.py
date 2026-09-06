@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.core.database import SessionLocal
-from app.models.user import User
+from app.core.database import SessionLocal  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 
 def main():

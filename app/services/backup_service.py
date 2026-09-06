@@ -15,15 +15,12 @@ Storage location: storage/backups/
 Retention: keep 7 backup terakhir (auto-cleanup)
 """
 
-import os
 import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
 
 from app.core.config import settings
-
 
 # Path constants
 BACKUP_DIR_NAME = "backups"
@@ -135,7 +132,7 @@ def backup_database_sql(retention: int = 7) -> dict:
     }
 
 
-def _cleanup_old_backups(retention: int, pattern: str = "flipus_backup_") -> List[str]:
+def _cleanup_old_backups(retention: int, pattern: str = "flipus_backup_") -> list[str]:
     """Hapus backup lama, simpan N terakhir."""
     backup_dir = Path.cwd() / "storage" / BACKUP_DIR_NAME
     if not backup_dir.exists():
@@ -152,7 +149,7 @@ def _cleanup_old_backups(retention: int, pattern: str = "flipus_backup_") -> Lis
     return deleted
 
 
-def list_backups() -> List[dict]:
+def list_backups() -> list[dict]:
     """List semua backup files di storage/backups/."""
     backup_dir = _ensure_backup_dir()
     items = []
@@ -196,7 +193,7 @@ def restore_database(filename: str, auto_backup_before: bool = True) -> dict:
             auto = backup_database(retention=99)  # don't cleanup
             auto_backup_path = auto["path"]
         except Exception as e:
-            raise RuntimeError(f"Auto-backup sebelum restore gagal: {e}")
+            raise RuntimeError(f'Auto-backup sebelum restore gagal: {e}') from e
 
     # Validate SQLite magic (kalau .db file)
     if src.suffix == ".db":

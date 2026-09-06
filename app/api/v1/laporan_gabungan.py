@@ -9,12 +9,10 @@ Authorization:
 - Bendahara/Ketua/Pendeta/Auditor Misi semua bisa GET (audit transparansi)
 - POST send-to-auditor: Bendahara saja
 """
+import logging
 import os
-import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -22,19 +20,22 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.v1.auth import get_current_user
 from app.core.tenant_scope import (
-    TenantScope, require_tenant_scope,
+    TenantScope,
+    require_tenant_scope,
 )
-from app.models.transaction import Kuitansi
-from app.models.pengeluaran import Pengeluaran
-from app.models.kategori_pengeluaran import KategoriPengeluaran
-from app.models.tenant import Tenant
-from app.models.user import User
 from app.models.audit import AuditLog
-from app.utils.number_to_words import terbilang
+from app.models.kategori_pengeluaran import KategoriPengeluaran
+from app.models.pengeluaran import Pengeluaran
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.models.user import User
 from app.services.pdf_gabungan import generate_gabungan_pdf
 from app.services.whatsapp import send_document_message
+from app.utils.number_to_words import terbilang
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ class KuitansiGabunganItem(BaseModel):
 class PengeluaranGabunganItem(BaseModel):
     nomor_pengeluaran: str
     kategori_nama: str
-    penerima: Optional[str]
+    penerima: str | None
     jumlah: int
     status: str
     status_label: str
@@ -79,18 +80,18 @@ class LaporanGabunganOut(BaseModel):
     count_kuitansi: int
     count_pengeluaran_approved: int
     count_pengeluaran_pending: int
-    kuitansi: List[KuitansiGabunganItem]
-    pengeluaran: List[PengeluaranGabunganItem]
+    kuitansi: list[KuitansiGabunganItem]
+    pengeluaran: list[PengeluaranGabunganItem]
 
 
 class SendToAuditorOut(BaseModel):
     status: str
     id_rekap_mingguan: str
-    pdf_path: Optional[str] = None
-    pdf_filename: Optional[str] = None
+    pdf_path: str | None = None
+    pdf_filename: str | None = None
     auditors_found: int
     auditors_notified: int
-    auditors_skipped: List[dict]  # [{"auditor_id": int, "reason": "no_whatsapp"}, ...]
+    auditors_skipped: list[dict]  # [{"auditor_id": int, "reason": "no_whatsapp"}, ...]
 
 
 # ===== Helpers =====
@@ -105,7 +106,7 @@ def _status_to_label(s: str) -> str:
     }.get(s, s)
 
 
-def _require_role(scope: "TenantScope", allowed: List[str]):
+def _require_role(scope: "TenantScope", allowed: list[str]):
     """FASE4-S6E: helper pakai TenantScope.role (single source of truth)."""
     if scope.role not in allowed:
         raise HTTPException(
@@ -143,7 +144,7 @@ def get_laporan_gabungan(
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
         .all()
@@ -155,7 +156,7 @@ def get_laporan_gabungan(
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Pengeluaran.is_purged == False)
+        .filter(Pengeluaran.is_purged == False)  # noqa: E712
         .filter(Pengeluaran.status != "draft")  # exclude draft
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
         .all()
@@ -261,7 +262,7 @@ def get_laporan_gabungan_pdf(
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
         .all()
@@ -270,7 +271,7 @@ def get_laporan_gabungan_pdf(
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Pengeluaran.is_purged == False)
+        .filter(Pengeluaran.is_purged == False)  # noqa: E712
         .filter(Pengeluaran.status != "draft")
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
         .all()
@@ -307,8 +308,8 @@ def get_laporan_gabungan_pdf(
             output_path=str(pdf_path),
         )
     except Exception as exc:
-        print(f"[LAPORAN-GABUNGAN-PDF] error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        raise HTTPException(500, f"Gagal generate PDF: {type(exc).__name__}: {str(exc)[:200]}")
+        logger.exception(f"[LAPORAN-GABUNGAN-PDF] error: {type(exc).__name__}: {exc}")
+        raise HTTPException(500, f"Gagal generate PDF: {type(exc).__name__}: {str(exc)[:200]}") from exc
 
     # Audit log
     try:
@@ -318,7 +319,7 @@ def get_laporan_gabungan_pdf(
         ))
         db.commit()
     except Exception as exc:
-        print(f"[LAPORAN-GABUNGAN-PDF] audit log error: {exc}", file=sys.stderr, flush=True)
+        logger.exception(f"[LAPORAN-GABUNGAN-PDF] audit log error: {exc}")
         db.rollback()
 
     # Read file & return as response
@@ -366,7 +367,7 @@ def send_laporan_gabungan_to_auditor(
         db.query(User)
         .filter(User.tenant_id == primary_tenant_id)
         .filter(User.role == "AUDITOR_MISI")
-        .filter(User.is_active == True)  # noqa: E712
+        .filter(User.is_active == True)  # noqa: E712  # noqa: E712
         .order_by(User.id.asc())
         .all()
     )
@@ -383,7 +384,7 @@ def send_laporan_gabungan_to_auditor(
         db.query(Kuitansi)
         .filter(Kuitansi.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Kuitansi.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .filter(Kuitansi.status == "finalized")
         .order_by(Kuitansi.nomor_kuitansi.asc())
         .all()
@@ -392,7 +393,7 @@ def send_laporan_gabungan_to_auditor(
         db.query(Pengeluaran)
         .filter(Pengeluaran.id_rekap_mingguan == id_rekap_mingguan)
         .filter(Pengeluaran.tenant_id.in_(scope.visible_tenant_ids))
-        .filter(Pengeluaran.is_purged == False)
+        .filter(Pengeluaran.is_purged == False)  # noqa: E712
         .filter(Pengeluaran.status != "draft")
         .order_by(Pengeluaran.nomor_pengeluaran.asc())
         .all()
@@ -430,8 +431,8 @@ def send_laporan_gabungan_to_auditor(
             output_path=str(pdf_path),
         )
     except Exception as exc:
-        print(f"[LAPORAN-GABUNGAN-SEND] pdf error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        raise HTTPException(500, f"Gagal generate PDF: {type(exc).__name__}: {str(exc)[:200]}")
+        logger.exception(f"[LAPORAN-GABUNGAN-SEND] pdf error: {type(exc).__name__}: {exc}")
+        raise HTTPException(500, f"Gagal generate PDF: {type(exc).__name__}: {str(exc)[:200]}") from exc
 
     # Compute summary for caption
     total_penerimaan = sum(k.total_pemberian_angka or 0 for k in kuitansi_rows)
@@ -474,7 +475,7 @@ def send_laporan_gabungan_to_auditor(
             if isinstance(resp, dict) and resp.get("status") in ("sent", "ok"):
                 notified += 1
         except Exception as exc:
-            print(f"[LAPORAN-GABUNGAN-SEND] send to {phone} failed: {exc}", file=sys.stderr, flush=True)
+            logger.exception(f"[LAPORAN-GABUNGAN-SEND] send to {phone} failed: {exc}")
             skipped.append({"auditor_id": auditor.id, "reason": f"fonnte_error: {str(exc)[:80]}"})
 
     # Audit log
@@ -490,7 +491,7 @@ def send_laporan_gabungan_to_auditor(
         ))
         db.commit()
     except Exception as exc:
-        print(f"[LAPORAN-GABUNGAN-SEND] audit log error: {exc}", file=sys.stderr, flush=True)
+        logger.exception(f"[LAPORAN-GABUNGAN-SEND] audit log error: {exc}")
         db.rollback()
 
     return SendToAuditorOut(

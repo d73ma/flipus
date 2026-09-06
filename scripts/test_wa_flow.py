@@ -15,8 +15,8 @@ Override sender lewat env var, contoh:
     SENDER=628123450001 .venv/bin/python3 scripts/test_wa_flow.py   # bendahara_b
 """
 import os
-import sys
 import time
+
 import requests
 
 BACKEND = os.environ.get("BACKEND", "http://localhost:8000")
@@ -38,7 +38,7 @@ def post_inbound(message: str, button_id: str | None = None) -> dict:
 
 
 def main():
-    print(f"=== Simulasi WA Input Bot ===")
+    print("=== Simulasi WA Input Bot ===")
     print(f"Sender: {SENDER}")
     print(f"Backend: {BACKEND}\n")
 

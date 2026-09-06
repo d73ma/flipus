@@ -11,10 +11,8 @@ Output: report per-file dengan:
 from __future__ import annotations
 
 import ast
-import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 API_DIR = Path("app/api/v1")
 
@@ -45,7 +43,7 @@ SAFE_PATTERNS = [
 ]
 
 
-def analyze_endpoint(node: ast.FunctionDef | ast.AsyncFunctionDef, decorators: List[ast.expr]) -> Tuple[str, List[str], List[str]]:
+def analyze_endpoint(node: ast.FunctionDef | ast.AsyncFunctionDef, decorators: list[ast.expr]) -> tuple[str, list[str], list[str]]:
     """Return (method_path, inline_findings, safe_findings)."""
     method_path = node.name
     # Extract HTTP method dari decorators (FastAPI: @router.get("/path"))
@@ -79,7 +77,7 @@ def analyze_endpoint(node: ast.FunctionDef | ast.AsyncFunctionDef, decorators: L
     return method_path, inline_findings, safe_findings
 
 
-def analyze_file(path: Path) -> Dict:
+def analyze_file(path: Path) -> dict:
     """Analyze satu file dan return summary."""
     src = path.read_text(encoding="utf-8")
     try:
@@ -91,7 +89,7 @@ def analyze_file(path: Path) -> Dict:
     file_uses_tenant_scope = any(p in src for p in SAFE_PATTERNS)
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             # Hanya function yang punya router decorator
             has_router_dec = False
             for dec in node.decorator_list:

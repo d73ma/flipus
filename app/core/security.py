@@ -1,13 +1,16 @@
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from jose import jwt, JWTError
-from passlib.context import CryptContext
-from cryptography.fernet import Fernet, InvalidToken
 import hashlib
+import logging
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Header, HTTPException, Request, status as _status
+from cryptography.fernet import Fernet, InvalidToken
+from fastapi import Header, HTTPException, Request
+from fastapi import status as _status
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # FASE 3-S2.T3 — dual-key Fernet window untuk PII rotation.
@@ -15,7 +18,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # fallback ke previous (old) kalau ada. Setelah re-encrypt selesai,
 # kosongkan PII_ENCRYPTION_KEY_PREVIOUS.
 _pii_fernet_primary = Fernet(settings.PII_ENCRYPTION_KEY.encode())
-_pii_fernet_previous: Optional[Fernet] = None
+_pii_fernet_previous: Fernet | None = None
 if settings.PII_ENCRYPTION_KEY_PREVIOUS:
     try:
         _pii_fernet_previous = Fernet(settings.PII_ENCRYPTION_KEY_PREVIOUS.encode())
@@ -30,7 +33,7 @@ def utcnow() -> datetime:
     Centering the fix here means we change ~20 call sites by editing one line,
     and any future deprecation (e.g. Python 3.16) needs updating only here.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def hash_password(plain: str) -> str:
@@ -42,7 +45,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(data: dict, expires_minutes: Optional[int] = None) -> str:
+def create_access_token(data: dict, expires_minutes: int | None = None) -> str:
     """
     Issue short-lived access token (default 15 menit, FASE 3-S3.S8).
 
@@ -61,10 +64,10 @@ def create_access_token(data: dict, expires_minutes: Optional[int] = None) -> st
     if "sub" in to_encode and not isinstance(to_encode["sub"], str):
         to_encode["sub"] = str(to_encode["sub"])
     minutes = expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    expire = datetime.now(UTC) + timedelta(minutes=minutes)
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "iss": "FLIPUS-UKIKT",
         "watermark": "FLIPUS_v1.1",
         "jti": uuid.uuid4().hex,  # v1.5-A: unique token ID untuk blacklist
@@ -73,7 +76,7 @@ def create_access_token(data: dict, expires_minutes: Optional[int] = None) -> st
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def create_refresh_token(data: dict, expires_days: Optional[int] = None) -> str:
+def create_refresh_token(data: dict, expires_days: int | None = None) -> str:
     """
     Issue long-lived refresh token (default 7 hari, FASE 3-S3.S8).
 
@@ -99,10 +102,10 @@ def create_refresh_token(data: dict, expires_days: Optional[int] = None) -> str:
     if "sub" in to_encode and not isinstance(to_encode["sub"], str):
         to_encode["sub"] = str(to_encode["sub"])
     days = expires_days or settings.REFRESH_TOKEN_EXPIRE_DAYS
-    expire = datetime.now(timezone.utc) + timedelta(days=days)
+    expire = datetime.now(UTC) + timedelta(days=days)
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "iss": "FLIPUS-UKIKT",
         "watermark": "FLIPUS_v1.1",
         "jti": uuid.uuid4().hex,
@@ -110,7 +113,7 @@ def create_refresh_token(data: dict, expires_days: Optional[int] = None) -> str:
     })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: str) -> dict | None:
     """
     Decode JWT — support dual-key rotation (T51).
 
@@ -198,7 +201,7 @@ def generate_tenant_signature(uni: str, kantor_misi: str, jemaat: str) -> str:
 
 def require_admin_bootstrap_dependency(
     request: Request,
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     FastAPI dependency: header `X-Admin-Token` harus cocok dengan
@@ -233,7 +236,7 @@ def require_admin_bootstrap_dependency(
             db.commit()
             db.close()
         except Exception:
-            pass
+            logger.exception("db.commit/close gagal saat verify admin token")
         raise HTTPException(
             status_code=_status.HTTP_401_UNAUTHORIZED,
             detail="X-Admin-Token tidak valid atau tidak diberikan",
@@ -250,6 +253,6 @@ def require_admin_bootstrap_dependency(
         db.commit()
         db.close()
     except Exception:
-        pass
+        logger.exception("db.commit/close gagal saat admin-token verification")
 
     return True

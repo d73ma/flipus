@@ -1,4 +1,5 @@
 """
+
 FLIPUS v1.3 — Kuitansi search + export endpoint (Tahap 22).
 
 Endpoint:
@@ -20,30 +21,36 @@ RBAC:
 - ADMIN_UNI: all jemaat in uni
 """
 
+
 import csv
 import io
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional, List
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func
 
 if TYPE_CHECKING:  # S4-D.R1: import InstrumentedAttribute only untuk mypy (runtime overhead = 0)
     from sqlalchemy.orm.attributes import InstrumentedAttribute
 
-from app.core.database import get_db
+import logging
+
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
 from app.core.security import decrypt_pii
 from app.core.tenant_scope import TenantScope, require_tenant_scope
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
-from app.models.master import MisiKonferens, Uni, PersentaseConfig
 from app.models.audit import AuditLog
+from app.models.master import PersentaseConfig
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+
 # FASE 2 S6/R5: recompute single pakai Jerry Model B (single source of truth).
 from app.utils.porsi_calculator import compute_porsi
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -55,8 +62,8 @@ class KuitansiListItem(BaseModel):
     nomor_kuitansi: str
     id_rekap_mingguan: str
     tanggal_sabat: str
-    nama_umat: Optional[str] = None  # decrypted
-    nomor_whatsapp: Optional[str] = None  # decrypted
+    nama_umat: str | None = None  # decrypted
+    nomor_whatsapp: str | None = None  # decrypted
     perpuluhan_x_angka: int
     pt_angka: int
     khusus_angka: int
@@ -64,13 +71,13 @@ class KuitansiListItem(BaseModel):
     porsi_kantor_misi: int
     porsi_kas_jemaat: int
     tenant_id: int
-    nama_jemaat: Optional[str] = None
+    nama_jemaat: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class KuitansiSearchOut(BaseModel):
-    items: List[KuitansiListItem]
+    items: list[KuitansiListItem]
     total: int
     page: int
     per_page: int
@@ -84,8 +91,8 @@ class FilterMetaOut(BaseModel):
     total_pt: int
     total_khusus: int
     total_pemberian: int
-    date_range_from: Optional[str]
-    date_range_to: Optional[str]
+    date_range_from: str | None
+    date_range_to: str | None
 
 
 # ===== Helpers =====
@@ -147,21 +154,21 @@ def _decrypt_kuitansi_fields(k: Kuitansi, db: Session = None, current: dict = No
             try:
                 db.rollback()
             except Exception:
-                pass
+                logger.exception("db.rollback() gagal saat audit-failure cleanup")
 
     return {"nama_umat": nama_umat, "nomor_whatsapp": nomor_wa}
 
 
 def _build_filters(
     db: Session,
-    visible_tenant_ids: List[int],
-    date_from: Optional[str],
-    date_to: Optional[str],
-    tipe: Optional[str],
-    nominal_min: Optional[int],
-    nominal_max: Optional[int],
-    id_rekap: Optional[str],
-    nama: Optional[str],
+    visible_tenant_ids: list[int],
+    date_from: str | None,
+    date_to: str | None,
+    tipe: str | None,
+    nominal_min: int | None,
+    nominal_max: int | None,
+    id_rekap: str | None,
+    nama: str | None,
 ):
     """Build SQLAlchemy filter conditions."""
     filters = []
@@ -173,7 +180,7 @@ def _build_filters(
         filters.append(Kuitansi.tenant_id.in_(visible_tenant_ids))
 
     # Purged excluded
-    filters.append(Kuitansi.is_purged == False)
+    filters.append(Kuitansi.is_purged == False)  # noqa: E712
 
     # Date range
     if date_from:
@@ -225,7 +232,7 @@ def _build_filters(
     return filters, nama
 
 
-def _apply_nama_filter(db: Session, q, nama: Optional[str]):
+def _apply_nama_filter(db: Session, q, nama: str | None):
     """Filter by nama (LIKE, decrypt-then-match)."""
     if not nama:
         return q
@@ -242,7 +249,7 @@ def _apply_nama_filter(db: Session, q, nama: Optional[str]):
                 if nama_dec and nama_lower in nama_dec.lower():
                     matching_ids.append(k.id)
             except Exception:
-                pass
+                logger.exception("decrypt_pii gagal saat filter nama")
     if not matching_ids:
         return q.filter(Kuitansi.id == -1)  # empty
     return q.filter(Kuitansi.id.in_(matching_ids))
@@ -262,14 +269,14 @@ def _is_valid_iso_date(s: str) -> bool:
 
 @router.get("/search", tags=['Kuitansi'], response_model=KuitansiSearchOut)
 def search_kuitansi(
-    date_from: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
-    date_to: Optional[str] = Query(None, description="ISO date YYYY-MM-DD"),
-    tipe: Optional[str] = Query(None, description="x|pt|khusus|x_pt|all_has_value|kosong"),
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),  # T23-1: default finalized
-    nominal_min: Optional[int] = Query(None, ge=0),
-    nominal_max: Optional[int] = Query(None, ge=0),
-    id_rekap: Optional[str] = Query(None),
-    nama: Optional[str] = Query(None, description="LIKE search (decrypt-then-match)"),
+    date_from: str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to: str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    tipe: str | None = Query(None, description="x|pt|khusus|x_pt|all_has_value|kosong"),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),  # T23-1: default finalized
+    nominal_min: int | None = Query(None, ge=0),
+    nominal_max: int | None = Query(None, ge=0),
+    id_rekap: str | None = Query(None),
+    nama: str | None = Query(None, description="LIKE search (decrypt-then-match)"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     sort_by: str = Query("tanggal_sabat", description="tanggal_sabat|nominal|created_at"),
@@ -375,7 +382,7 @@ def search_kuitansi(
 
 @router.get("/filter-meta", tags=['Kuitansi'], response_model=FilterMetaOut)
 def filter_meta(
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
     scope: TenantScope = Depends(require_tenant_scope),
@@ -397,7 +404,7 @@ def filter_meta(
 
     q = db.query(Kuitansi).filter(
         Kuitansi.tenant_id.in_(visible_tenant_ids),
-        Kuitansi.is_purged == False,
+        Kuitansi.is_purged == False,  # noqa: E712)
     )
     if status_filter != "all":
         q = q.filter(Kuitansi.status == status_filter)
@@ -433,13 +440,13 @@ def filter_meta(
 @router.get("/export", tags=['Kuitansi'])
 def export_kuitansi(
     format: str = Query("csv", description="csv|xlsx|pdf"),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    tipe: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
-    nominal_min: Optional[int] = Query(None),
-    nominal_max: Optional[int] = Query(None),
-    id_rekap: Optional[str] = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    tipe: str | None = Query(None),
+    status_filter: str | None = Query("finalized", description="T23-1: draft|finalized|rejected|all"),
+    nominal_min: int | None = Query(None),
+    nominal_max: int | None = Query(None),
+    id_rekap: str | None = Query(None),
     db: Session = Depends(get_db),
     current: dict = Depends(get_current_user),
     scope: TenantScope = Depends(require_tenant_scope),
@@ -513,27 +520,29 @@ def get_kuitansi_pdf(
     FASE4-S5B: require_tenant_scope ensures cross-tenant isolation at SQL level.
     """
     from fastapi.responses import StreamingResponse
+
     from app.utils.number_to_words import rupiah_to_words
     try:
         from reportlab.lib import colors as rl_colors
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
         )
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "reportlab belum terinstall — pip install reportlab",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'reportlab belum terinstall — pip install reportlab') from None
 
     # Fetch kuitansi dengan tenant-scope RBAC (FASE4-S5B: dari require_tenant_scope)
     visible_tenant_ids = scope.visible_tenant_ids
     k = db.query(Kuitansi).filter(
         Kuitansi.id == kuitansi_id,
         Kuitansi.tenant_id.in_(visible_tenant_ids),
-        Kuitansi.is_purged == False,
+        Kuitansi.is_purged == False,  # noqa: E712)
     ).first()
     if not k:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Kuitansi tidak ditemukan / di luar scope Anda")
@@ -760,7 +769,7 @@ def get_kuitansi_pdf(
         id_rekap_mingguan=k.id_rekap_mingguan,
         nomor_kuitansi_token=k.nomor_kuitansi[:32] if k.nomor_kuitansi else None,
         action=f"KUITANSI_PDF_DOWNLOAD_user_{current['id']}_k_{k.id}",
-        payload_hash=f"format=pdf_single",
+        payload_hash="format=pdf_single",
     ))
     db.commit()
 
@@ -776,9 +785,9 @@ def get_kuitansi_pdf(
 
 def _export_csv(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate CSV streaming response."""
@@ -811,7 +820,7 @@ def _export_csv(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_CSV_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=csv",
+        payload_hash="format=csv",
     ))
     db.commit()
 
@@ -828,26 +837,23 @@ def _export_csv(
 
 def _export_xlsx(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate XLSX streaming response. Requires openpyxl."""
     try:
         from openpyxl import Workbook
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "openpyxl belum terinstall — pip install openpyxl",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'openpyxl belum terinstall — pip install openpyxl') from None
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Kuitansi"
 
     # Headers (bold)
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     ws.append(headers)
     for cell in ws[1]:
@@ -888,7 +894,7 @@ def _export_xlsx(
             ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
         except Exception:
             # If any column has issues, skip auto-size for it
-            pass
+            logger.exception(f"auto-size column {col_letter!r} gagal, skip")
 
     # Save to bytes
     output = io.BytesIO()
@@ -900,7 +906,7 @@ def _export_xlsx(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_XLSX_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=xlsx",
+        payload_hash="format=xlsx",
     ))
     db.commit()
 
@@ -920,9 +926,9 @@ def _export_xlsx(
 
 def _export_pdf(
     db: Session,
-    rows: List[Kuitansi],
+    rows: list[Kuitansi],
     tenant_map: dict,
-    headers: List[str],
+    headers: list[str],
     current: dict,
 ) -> StreamingResponse:
     """Generate PDF list kuitansi (landscape, FLIPUS branding). T73.
@@ -932,16 +938,17 @@ def _export_pdf(
     try:
         from reportlab.lib import colors as rl_colors
         from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
         )
     except ImportError:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "reportlab belum terinstall — pip install reportlab",
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'reportlab belum terinstall — pip install reportlab') from None
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -957,7 +964,6 @@ def _export_pdf(
 
     # FLIPUS brand colors
     COLOR_PRIMARY = rl_colors.HexColor("#1B4332")  # green tua
-    COLOR_GOLD = rl_colors.HexColor("#B8860B")
     COLOR_BORDER = rl_colors.HexColor("#e5e7eb")
 
     styles = getSampleStyleSheet()
@@ -1070,7 +1076,7 @@ def _export_pdf(
     db.add(AuditLog(
         tenant_id=current["tenant_id"],
         action=f"KUITANSI_EXPORT_PDF_user_{current['id']}_count_{len(rows)}",
-        payload_hash=f"format=pdf",
+        payload_hash="format=pdf",
     ))
     db.commit()
 
@@ -1218,7 +1224,7 @@ def recompute_porsi_single(
     k.porsi_x_uni = porsi["pu_x"]
     k.porsi_pt_uni = porsi["pu_pt"]
     k.porsi_khusus_uni = porsi["pu_kh"]
-    k.porsi_recomputed_at = datetime.now(timezone.utc)
+    k.porsi_recomputed_at = datetime.now(UTC)
 
     # Snapshot AFTER
     after = {

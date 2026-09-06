@@ -12,33 +12,28 @@ Flow:
 3. State machine transition (IDLE → AWAIT_X → AWAIT_PT → AWAIT_KH → CONFIRM → SAVED)
 4. Reply via Fonnte API
 """
-import json
 import logging
 import os
-import sys as _sys
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
-from app.core.database import get_db
-from app.core.security import encrypt_pii, decrypt_pii
-from app.core.rate_limiter import limiter as _rate_limiter
 from app.api.v1.auth import require_roles  # T94 Section 8: proper RBAC
+from app.core.database import get_db
+from app.core.rate_limiter import limiter as _rate_limiter
+from app.core.security import decrypt_pii, encrypt_pii
 from app.models.audit import AuditLog
+from app.models.master import PersentaseConfig
 from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
 from app.models.user import User
-from app.models.wa_session import WaSession
 from app.services.wa_input_state import (
-    IDLE_TIMEOUT_MINUTES,
     MAX_STAGING_PER_DAY,
-    UNDO_WINDOW_MINUTES,
     get_or_create_session,
     get_payload,
     parse_and_validate_nominal,
@@ -47,8 +42,6 @@ from app.services.wa_input_state import (
 )
 from app.utils.porsi_calculator import compute_porsi
 from app.utils.sabat_counter import get_effective_sabat_for_input
-from app.models.master import PersentaseConfig
-
 
 log = logging.getLogger("flipus.wa_input")
 
@@ -62,21 +55,20 @@ router = APIRouter()
 # rate limit key unik per nomor pengirim.
 from app.core.rate_limiter import _key_func_by_phone  # noqa: E402  (shared key_func)
 
-
 # ==================== INBOUND WEBHOOK ====================
 
 class WaInboundPayload(BaseModel):
     """Payload dari Fonnte webhook (general WA Business API)."""
-    device: Optional[str] = None
-    sender: Optional[str] = None  # Fonnte 'sender' field
-    name: Optional[str] = None
-    message: Optional[str] = None
-    type: Optional[str] = "text"  # 'text' | 'button_reply' | 'list_reply'
-    button_id: Optional[str] = None
-    button_text: Optional[str] = None
+    device: str | None = None
+    sender: str | None = None  # Fonnte 'sender' field
+    name: str | None = None
+    message: str | None = None
+    type: str | None = "text"  # 'text' | 'button_reply' | 'list_reply'
+    button_id: str | None = None
+    button_text: str | None = None
     # Legacy Fonnte fields
-    from_: Optional[str] = None  # alias
-    id: Optional[str] = None  # Fonnte message ID
+    from_: str | None = None  # alias
+    id: str | None = None  # Fonnte message ID
 
     class Config:
         populate_by_name = True
@@ -195,7 +187,7 @@ def _send_fonnte_reply(phone: str, message: str, buttons: list[dict] | None = No
 def _reply_menu(tenant_name: str = "") -> dict:
     """Build main menu reply."""
     msg = (
-        f"*FLIPUS Input Kuitansi*"
+        "*FLIPUS Input Kuitansi*"
         + (f"\nJemaat: {tenant_name}" if tenant_name else "")
         + "\n\nPilih aksi:"
     )
@@ -239,7 +231,6 @@ def _reply_await_nama() -> dict:
 
 def _reply_confirm(x: int, pt: int, kh: int, nama: str) -> dict:
     """Build CONFIRM reply."""
-    total = x + pt + kh
     msg = (
         "*Konfirmasi Kuitansi:*\n\n"
         f"• Nama Pemberi : {nama}\n"
@@ -274,7 +265,7 @@ def _reply_pilih_jemaat(tenants: list[Tenant]) -> dict:
     """Build reply untuk multi-tenant Bendahara (Q4)."""
     msg = "*Pilih jemaat:*"
     buttons = []
-    for i, t in enumerate(tenants[:3], 1):
+    for t in tenants[:3]:
         buttons.append({"id": f"btn_pilih_{t.id}", "text": t.nama_jemaat_lokal[:20]})
     return {"message": msg, "buttons": buttons}
 
@@ -428,7 +419,7 @@ async def wa_inbound(request: Request, db: Session = Depends(get_db)):
             f"--- request body: {_parsed_body}"
         )
         log.error(err_msg)
-        print(err_msg, file=_sys.stderr)
+        log.exception(err_msg)
         phone = _normalize_phone(_parsed_body.get("sender") or _parsed_body.get("from") or "")
         if phone:
             try:
@@ -437,9 +428,9 @@ async def wa_inbound(request: Request, db: Session = Depends(get_db)):
                     f"⚠️ Sistem error: {type(e).__name__}. Coba lagi atau hubungi Admin.",
                 )
             except Exception:
-                pass
+                log.exception("Fonnte error reply gagal terkirim")
         _detail = f"{type(e).__name__}: {e}\n\n--- traceback ---\n{_tb_text[-2000:]}"
-        raise HTTPException(status_code=500, detail=_detail)
+        raise HTTPException(status_code=500, detail=_detail) from e
 
 
 async def _wa_inbound_impl(request: Request, db: Session, body: dict):
@@ -454,7 +445,6 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
     device_clean = _normalize_phone(device)
     message = (body.get("message") or "").strip()
     button_id = body.get("button_id") or ""
-    msg_type = body.get("type", "text")
     fonnte_msg_id = body.get("id") or ""
 
     # CRITICAL: Ignore echo dari bot sendiri (Fonnte webhook trigger untuk outgoing juga)
@@ -479,7 +469,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
         db.query(User)
         .filter(
             User.role == "BENDAHARA",
-            User.is_active == True,
+            User.is_active == True,  # noqa: E712
             User.nomor_whatsapp.isnot(None),
         )
         .all()
@@ -648,7 +638,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
                 log.info(f"[WA-BTN-SIMPAN-PARSED] x={x} pt={pt} kh={kh} nama={nama_pemberi!r} tenant_id={tenant_id}")
 
                 # Anti-spam: max staging per hari
-                today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 # SQLite strip tz info dari kolom DATETIME, jadi Kuitansi.created_at
                 # jadi offset-naive saat dibaca. Buat today_start juga naive
                 # supaya comparable. (Lost tz but OK untuk compare "same day".)
@@ -733,7 +723,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
                     created_via="wa",
                     wa_message_id=fonnte_msg_id or None,
                     wa_sender=phone,
-                    sabat_sesi=datetime.now(timezone.utc).strftime("%Y-%m"),
+                    sabat_sesi=datetime.now(UTC).strftime("%Y-%m"),
                     temp_nomor=f"STG-{int(time.time()) % 100000:05d}",
                 )
                 db.add(k)
@@ -761,9 +751,9 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
                 db.rollback()
                 err_msg = f"[WA-BTN-SIMPAN] error: {type(e).__name__}: {e}\n{_tb.format_exc()}"
                 log.error(err_msg)
-                print(err_msg, file=_sys.stderr)
+                log.exception(err_msg)
                 _send_fonnte_reply(phone, f"⚠️ Gagal simpan staging: {type(e).__name__}. Coba lagi atau hubungi Admin.")
-                raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+                raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
 
     # Tombol Cocokkan
     if button_id == "btn_cocokkan":
@@ -772,7 +762,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
             db.query(Kuitansi)
             .filter(
                 Kuitansi.tenant_id == tenant.id,
-                Kuitansi.is_finalized == False,
+                Kuitansi.is_finalized == False,  # noqa: E712
                 Kuitansi.created_via == "wa",
                 Kuitansi.wa_sender == phone,
             )
@@ -888,7 +878,7 @@ async def _wa_inbound_impl(request: Request, db: Session, body: dict):
 
 @router.get("/kuitansi/staging", tags=['WhatsApp'])
 def list_staging(
-    tenant_id: Optional[int] = None,
+    tenant_id: int | None = None,
     current: dict = Depends(require_roles("BENDAHARA")),
     db: Session = Depends(get_db),
 ):
@@ -902,7 +892,7 @@ def list_staging(
         db.query(Kuitansi)
         .filter(
             Kuitansi.tenant_id == effective_tenant,
-            Kuitansi.is_finalized == False,
+            Kuitansi.is_finalized == False,  # noqa: E712
             Kuitansi.created_via == "wa",
         )
         .order_by(Kuitansi.created_at.desc())
@@ -916,7 +906,7 @@ def list_staging(
         .filter(
             Kuitansi.tenant_id == effective_tenant,
             Kuitansi.created_via.in_(["web", "ocr"]),
-            Kuitansi.is_finalized == True,
+            Kuitansi.is_finalized == True,  # noqa: E712
         )
         .scalar()
     )
@@ -963,7 +953,7 @@ def delete_staging_item(
         .filter(
             Kuitansi.id == item_id,
             Kuitansi.tenant_id == current["tenant_id"],
-            Kuitansi.is_finalized == False,
+            Kuitansi.is_finalized == False,  # noqa: E712
         )
         .first()
     )
@@ -991,7 +981,7 @@ def delete_staging_item(
             payload_hash=hashlib.sha256(detail_str.encode()).hexdigest()[:32],
         ))
     except Exception:
-        pass
+        log.exception("audit log untuk delete-staging gagal, lanjut hapus tetap")
 
     db.delete(item)
     db.commit()
@@ -1025,7 +1015,7 @@ def finalize_staging(
         .filter(
             Kuitansi.id.in_(body.staging_ids),
             Kuitansi.tenant_id == current["tenant_id"],
-            Kuitansi.is_finalized == False,
+            Kuitansi.is_finalized == False,  # noqa: E712
         )
         .all()
     )
@@ -1035,7 +1025,7 @@ def finalize_staging(
 
     # Counter per (tenant, YYYY-MM) — pakai MAX(nomor) LIKE 'YYYY-MM%' + safety net
     counter_map: dict[tuple[int, str], int] = {}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # T110: validate override tanggal_sabat format
     override_tgl: str | None = None
     if body.tanggal_sabat:
@@ -1044,7 +1034,7 @@ def finalize_staging(
             _dt.strptime(body.tanggal_sabat, "%Y-%m-%d")
             override_tgl = body.tanggal_sabat
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"tanggal_sabat format harus YYYY-MM-DD, dapat {body.tanggal_sabat!r}")
+            raise HTTPException(status_code=400, detail=f"tanggal_sabat format harus YYYY-MM-DD, dapat {body.tanggal_sabat!r}") from None
 
     for k in items:
         # T110: kalau frontend kirim override, pakai itu
@@ -1058,7 +1048,7 @@ def finalize_staging(
                 .filter(
                     Kuitansi.tenant_id == k.tenant_id,
                     Kuitansi.nomor_kuitansi.like(f"{effective_tgl.replace('-', '')}%"),
-                    Kuitansi.is_finalized == True,
+                    Kuitansi.is_finalized == True,  # noqa: E712
                 )
                 .scalar()
             )

@@ -21,30 +21,28 @@ integration test di akhir.
 """
 from __future__ import annotations
 
-import pytest
 from dataclasses import FrozenInstanceError
+
+import pytest
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
 
 from app.core.tenant_scope import (
-    TenantScope,
-    resolve_tenant_scope,
-    require_tenant_scope,
-    tenant_filter,
-    assert_can_access,
-    ROLE_JEMAAT_ONLY,
-    ROLE_AUDITOR_MISI,
-    ROLE_ADMIN_UNI,
     ALL_ROLES,
+    ROLE_ADMIN_UNI,
+    ROLE_AUDITOR_MISI,
+    ROLE_JEMAAT_ONLY,
+    TenantScope,
+    assert_can_access,
+    resolve_tenant_scope,
+    tenant_filter,
 )
+from app.models.master import MisiKonferens, Uni
 from app.models.tenant import Tenant
-from app.models.master import Uni, MisiKonferens
-from app.models.user import User
 from app.models.transaction import Kuitansi
+from app.models.user import User
 
 # Import login helper dari conftest untuk integration tests
 from tests.conftest import login
-
 
 # ============================================================================
 # 1. TenantScope dataclass

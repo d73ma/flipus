@@ -16,17 +16,15 @@ All endpoints require authentication and scope to current user_id.
 from __future__ import annotations
 
 from datetime import datetime
-from app.core.security import utcnow
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
+from app.core.database import get_db
+from app.core.security import utcnow
 from app.models.notification import Notification
-from app.models.user import User
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -39,12 +37,12 @@ class NotificationOut(BaseModel):
     title: str
     message: str
     icon: str
-    link: Optional[str] = None
-    related_entity_type: Optional[str] = None
-    related_entity_id: Optional[str] = None
+    link: str | None = None
+    related_entity_type: str | None = None
+    related_entity_id: str | None = None
     is_read: bool
     created_at: datetime
-    read_at: Optional[datetime] = None
+    read_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -11,8 +11,9 @@ Flow:
    - Ada → return response yg tersimpan (no re-send)
    - Tidak ada → create job + send + simpan response
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, JSON, UniqueConstraint, Index
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 

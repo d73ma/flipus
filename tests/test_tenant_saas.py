@@ -16,12 +16,6 @@ Run dengan:
 """
 
 import os
-import sys
-import pytest
-from datetime import datetime, timedelta
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
 
 # Set test env sebelum import app
 os.environ["DATABASE_URL_LOCAL"] = "sqlite:///./test_flipus_t20.db"
@@ -29,14 +23,11 @@ os.environ["SECRET_KEY"] = "test-secret-key-t20-do-not-use-in-prod"
 os.environ["PII_ENCRYPTION_KEY"] = "k7XQz9pV3mR2nT8sW1yA4bC6dE5fG0hI="
 os.environ["LICENSE_TENANT_SIGNATURE_SALT"] = "test-salt-t20"
 
-from app.main import app
-from app.core.database import Base, get_db
-from app.core.security import hash_password, generate_tenant_signature
+from app.core.security import generate_tenant_signature, hash_password
+from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, Uni
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.models.master import Uni, MisiKonferens
-from app.models.audit import AuditLog
-
 
 # ===== Test DB setup removed — pakai conftest.py =====
 

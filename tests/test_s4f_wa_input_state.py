@@ -17,23 +17,23 @@ Functions:
 - reset_session: reset ke IDLE
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.models.wa_session import WaSession
 from app.services.wa_input_state import (
     IDLE_TIMEOUT_MINUTES,
-    UNDO_WINDOW_MINUTES,
     MAX_STAGING_PER_DAY,
+    UNDO_WINDOW_MINUTES,
     VALID_NEXT_STATES,
+    _ensure_aware,
     get_or_create_session,
-    set_state,
     get_payload,
     parse_and_validate_nominal,
     reset_session,
-    _ensure_aware,
+    set_state,
 )
-from app.models.wa_session import WaSession
 
 
 class TestEnsureAware:
@@ -47,13 +47,13 @@ class TestEnsureAware:
         result = _ensure_aware(naive)
         assert result is not None
         assert result.tzinfo is not None
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_already_aware_unchanged(self):
-        aware = datetime(2026, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        aware = datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC)
         result = _ensure_aware(aware)
         assert result == aware
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
 
 class TestGetOrCreateSession:
@@ -91,7 +91,7 @@ class TestGetOrCreateSession:
         """Session dengan expires_at di masa lalu → auto-reset ke IDLE."""
         db = test_db()
         # Create session with expired expires_at
-        past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
+        past = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10)
         s = WaSession(
             phone="628123456003",
             state="AWAIT_X",
@@ -126,9 +126,9 @@ class TestSetState:
         """AWAIT_X state → expires_at = now + 5 menit."""
         db = test_db()
         s = get_or_create_session(db, phone="628123456005")
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         set_state(db, s, "AWAIT_X", payload={"nominal_x": 100_000})
-        after = datetime.now(timezone.utc)
+        datetime.now(UTC)
         assert s.state == "AWAIT_X"
         assert s.expires_at is not None
         # TTL = 5 menit dari waktu set

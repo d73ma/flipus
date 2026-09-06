@@ -17,10 +17,8 @@ Strategy: pakai tmp_path pytest fixture + monkeypatch settings.DATABASE_URL_LOCA
 + monkeypatch Path.cwd() agar tests tidak touch real storage/.
 """
 
-import os
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -49,7 +47,6 @@ def fake_storage(tmp_path, monkeypatch):
     )
 
     # Mock Path.cwd() → tmp_path (backup_dir = tmp_path/storage/backups)
-    original_cwd = Path.cwd
     monkeypatch.setattr("pathlib.Path.cwd", lambda: tmp_path)
 
     return tmp_path, db_file

@@ -1,5 +1,6 @@
 """Kirim kuitansi digital ke WhatsApp umat (via Fonnte/Wablas)."""
 import logging
+
 import httpx
 
 from app.core.config import settings

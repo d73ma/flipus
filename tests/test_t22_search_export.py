@@ -8,8 +8,6 @@ Run:
     .venv/bin/python3 -m pytest tests/test_t22_search_export.py -v
 """
 
-import pytest
-from datetime import datetime, timedelta
 
 
 class TestKuitansiSearch:
@@ -37,16 +35,13 @@ class TestKuitansiSearch:
         self, client, bendahara_token, jemaat_a, create_kuitansi
     ):
         """Search by nama (encrypted) should decrypt-then-match."""
-        from app.core.security import encrypt_pii
-        db = create_kuitansi(jemaat_a.id)
+        create_kuitansi(jemaat_a.id)
         # Overwrite nama to specific test value
-        from app.models.transaction import Kuitansi
-        from app.core.database import SessionLocal
         # Use the test_db directly
         from app.core.database import get_db
         from app.main import app
         # Direct DB manipulation
-        engine = app.dependency_overrides[get_db]().__next__().get_bind()
+        app.dependency_overrides[get_db]().__next__().get_bind()
 
         # Create new kuitansi with specific nama
         create_kuitansi(jemaat_a.id)

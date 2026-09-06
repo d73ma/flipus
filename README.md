@@ -8,6 +8,15 @@
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![React](https://img.shields.io/badge/react-18-blue.svg)]()
 
+<!-- FASE 5 Sprint 3: CI status badges. The placeholder `<OWNER>/<REPO>`
+     below MUST be updated to the real GitHub path after the repo is
+     pushed. Until then, the badges will 404 — that's expected and
+     not a code bug. -->
+[![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml)
+[![Secrets Scan](https://github.com/<OWNER>/<REPO>/actions/workflows/secrets-scan.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/secrets-scan.yml)
+[![codecov](https://codecov.io/gh/<OWNER>/<REPO>/branch/main/graph/badge.svg)](https://codecov.io/gh/<OWNER>/<REPO>)
+[![Coverage](https://img.shields.io/badge/coverage-69.2%25-yellow.svg)]()
+
 ---
 
 ## � Quick Start
@@ -158,7 +167,44 @@ npm run dev
 
 ---
 
-## 🚀 Production Deployment
+## 🛠️ Development & CI
+
+FASE 5 Sprint 3 — every push & PR ke `main` otomatis menjalankan:
+
+| Check | Tool | Gate |
+|---|---|---|
+| Lint (E/F/B/I/C4/S/T20/UP) | `ruff` | **block** |
+| Format check | `ruff format --check` | **block** |
+| Type check (advisory) | `mypy` | warn only |
+| AST vuln scan | `bandit` | **block** pada MEDIUM/HIGH |
+| Dep vuln scan | `pip-audit` (PyPA) | **block** |
+| Secret pattern scan | `gitleaks` | **block** |
+| Test suite + coverage | `pytest --cov-fail-under=69.0` | **block** |
+
+Workflow files:
+- [`.github/workflows/ci.yml`](/Users/jerrymauri/Flipus/.github/workflows/ci.yml:1) — lint + typecheck + security + test
+- [`.github/workflows/secrets-scan.yml`](/Users/jerrymauri/Flipus/.github/workflows/secrets-scan.yml:1) — gitleaks
+- [`.gitleaks.toml`](/Users/jerrymauri/Flipus/.gitleaks.toml:1) — FLIPUS-specific patterns (PII key, salt, Fonnte, Gemini)
+
+### Run CI suite locally
+
+Sebelum push, jalankan suite yang sama persis dengan GitHub Actions:
+
+```bash
+make ci          # lint + typecheck + security + test-cov
+```
+
+Atau per langkah:
+```bash
+make lint        # ruff
+make typecheck        # mypy
+make security        # bandit + pip-audit
+make test-cov        # pytest with coverage gate
+```
+
+---
+
+## � Production Deployment
 
 ```bash
 # 1. Setup HTTPS (Let's Encrypt)

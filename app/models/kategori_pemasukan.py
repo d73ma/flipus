@@ -11,7 +11,8 @@ Aturan Jerry (2026-08-27):
 - Scope: per tenant (jemaat lokal)
 - Siapa bisa menambah: hanya Bendahara jemaat (lihat RBAC v2.0)
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, Index, func, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+
 from app.core.database import Base
 
 

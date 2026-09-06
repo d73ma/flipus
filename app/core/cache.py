@@ -22,7 +22,8 @@ import json
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 
 class LRUCache:
@@ -35,7 +36,7 @@ class LRUCache:
         self._hits = 0
         self._misses = 0
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         with self._lock:
             if key not in self._cache:
                 self._misses += 1
@@ -53,7 +54,7 @@ class LRUCache:
             self._hits += 1
             return value
 
-    def set(self, key: str, value: Any, ttl_seconds: Optional[int] = None):
+    def set(self, key: str, value: Any, ttl_seconds: int | None = None):
         with self._lock:
             # Compute expiry
             expires_at = time.time() + ttl_seconds if ttl_seconds else None
@@ -99,13 +100,13 @@ def _make_cache_key(func_name: str, args: tuple, kwargs: dict) -> str:
         # Convert non-serializable args to str
         safe_args = tuple(
             json.dumps(arg, sort_keys=True, default=str)
-            if isinstance(arg, (dict, list))
+            if isinstance(arg, dict | list)
             else str(arg)
             for arg in args
         )
         safe_kwargs = {
             k: json.dumps(v, sort_keys=True, default=str)
-            if isinstance(v, (dict, list))
+            if isinstance(v, dict | list)
             else str(v)
             for k, v in sorted(kwargs.items())
         }
@@ -150,7 +151,7 @@ def cached(ttl_seconds: int = 300):
     return decorator
 
 
-def invalidate_cache(pattern: Optional[str] = None):
+def invalidate_cache(pattern: str | None = None):
     """
     Invalidate cache entries.
 

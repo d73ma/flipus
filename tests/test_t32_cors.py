@@ -13,10 +13,8 @@ Memverifikasi:
 from __future__ import annotations
 
 import importlib
-import os
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -125,6 +123,7 @@ def test_wildcard_origin_is_dangerous_with_credentials():
 def client():
     """Standard FastAPI TestClient — pakai conftest.py env defaults."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)

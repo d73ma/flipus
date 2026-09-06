@@ -11,7 +11,6 @@ Untuk Auditor/Admin Uni, hitung porsi 2-layer:
 - Layer 2 (Misi→Uni): Porsi_X_Uni = Porsi_X_Misi * pct_x_uni
 """
 
-from typing import Optional
 
 
 def calculate_distribution(

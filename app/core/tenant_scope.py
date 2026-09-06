@@ -50,16 +50,13 @@ q = tenant_filter(db.query(Kuitansi), Kuitansi, scope)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import Select
 
 from app.core.database import get_db
 from app.models.master import MisiKonferens, Uni
 from app.models.tenant import Tenant
-
 
 # Role yang punya akses lintas jemaat (RBAC 5-tier FLIPUS)
 ROLE_JEMAAT_ONLY = {"BENDAHARA", "KETUA_KEUANGAN", "PENDETA"}
@@ -85,9 +82,9 @@ class TenantScope:
     """
 
     role: str
-    primary_tenant_id: Optional[int]
-    visible_tenant_ids: List[int] = field(default_factory=list)
-    user_id: Optional[int] = None
+    primary_tenant_id: int | None
+    visible_tenant_ids: list[int] = field(default_factory=list)
+    user_id: int | None = None
     is_cross_tenant: bool = False
 
     def can_see(self, tenant_id: int) -> bool:
@@ -128,14 +125,14 @@ def resolve_tenant_scope(db: Session, current: dict) -> TenantScope:
         )
 
     # Primary tenant — kalau record hilang dari DB, treat sebagai "no access"
-    primary: Optional[Tenant] = None
+    primary: Tenant | None = None
     if raw_tenant_id is not None:
         primary = db.query(Tenant).filter(Tenant.id == raw_tenant_id).first()
 
     if role in ROLE_JEMAAT_ONLY:
         # Single-tenant access: jemaat level only
         if primary is None:
-            visible_ids: List[int] = []
+            visible_ids: list[int] = []
         else:
             visible_ids = [primary.id]
 
@@ -209,7 +206,8 @@ def require_tenant_scope(
         # 2. ADMIN_UNI nama_uni tidak match ke tabel Uni (legacy tenant)
         # 3. Tenant record sudah dihapus
         # UX: explicit 403 supaya tidak silently return empty results.
-        from fastapi import HTTPException, status as _status
+        from fastapi import HTTPException
+        from fastapi import status as _status
         raise HTTPException(
             _status.HTTP_403_FORBIDDEN,
             f"Tenant scope kosong untuk role '{scope.role}'. "
@@ -251,7 +249,8 @@ def assert_can_access(scope: TenantScope, tenant_id: int) -> None:
         PermissionError: 403-equivalent.
     """
     if not scope.can_see(tenant_id):
-        from fastapi import HTTPException, status as _status
+        from fastapi import HTTPException
+        from fastapi import status as _status
         raise HTTPException(
             _status.HTTP_403_FORBIDDEN,
             f"Tenant {tenant_id} tidak ada dalam scope caller.",

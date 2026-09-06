@@ -8,8 +8,6 @@ Reset per bulan (counter urut dari 1 tiap awal bulan Romawi).
 """
 
 from datetime import datetime
-from typing import Optional
-
 
 # Konversi bulan (1-12) → Romawi
 _BULAN_ROMAN = {
@@ -28,7 +26,7 @@ def bulan_ke_romawi(bulan: int) -> str:
 def generate_nomor_kuitansi(
     urutan: int,
     initial_jemaat: str,
-    tanggal: Optional[datetime] = None,
+    tanggal: datetime | None = None,
 ) -> str:
     """
     Generate nomor kuitansi sesuai format GMAHK.
@@ -56,7 +54,7 @@ def generate_nomor_kuitansi(
     return f"{urutan:03d}/{initial}/{bulan_romawi}/{tahun_2d}"
 
 
-def generate_id_rekap_mingguan(tanggal: Optional[datetime] = None) -> str:
+def generate_id_rekap_mingguan(tanggal: datetime | None = None) -> str:
     """
     Generate id_rekap_mingguan per minggu (Sabat).
 

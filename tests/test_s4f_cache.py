@@ -24,10 +24,10 @@ import pytest
 
 from app.core.cache import (
     LRUCache,
+    _make_cache_key,
     cache,
     cached,
     invalidate_cache,
-    _make_cache_key,
 )
 
 

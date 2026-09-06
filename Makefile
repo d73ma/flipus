@@ -1,5 +1,5 @@
 # FLIPUS Developer Makefile
-# FASE 3 Sprint 4 — baseline tooling
+# FASE 5 Sprint 3 — CI pipeline targets
 # Usage: make <target>
 
 VENV := .venv
@@ -8,18 +8,20 @@ PIP  := $(VENV)/bin/pip
 RUFF := $(VENV)/bin/ruff
 MYPY := $(VENV)/bin/mypy
 PYTEST := $(VENV)/bin/pytest
+BANDIT := $(VENV)/bin/bandit
+PIPAUDIT := $(VENV)/bin/pip-audit
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install test test-fast test-cov lint lint-fix typecheck coverage coverage-html clean
+.PHONY: help install test test-fast test-cov lint lint-fix typecheck \
+        security-bandit security-audit security coverage coverage-html clean ci
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install dev tooling (mypy, pytest-cov, ruff)
+install:  ## Install dev tooling (mypy, pytest-cov, ruff, bandit, pip-audit)
 	$(PIP) install -r requirements.txt
-	$(PIP) install mypy==1.13.0 pytest-cov==5.0.0 ruff==0.7.4
 
 test:  ## Run full test suite
 	$(PYTEST) -q
@@ -42,6 +44,24 @@ lint-fix:  ## Run ruff linter with auto-fix
 
 typecheck:  ## Run mypy type checker
 	$(MYPY) app/
+
+# ----- FASE 5 Sprint 3: security tooling -----
+
+security-bandit:  ## AST-based security scan (bandit). Skips tests/ scripts/.
+	$(BANDIT) -r app/ -ll --skip B105,B106,B107
+
+security-audit:  ## Audit installed deps against PyPI Advisory DB (pip-audit)
+	$(PIPAUDIT) --strict
+
+security:  ## Run all security checks (bandit + pip-audit)
+	$(MAKE) security-bandit
+	$(MAKE) security-audit
+
+# Run the same checks GitHub Actions runs, locally.
+# Useful as a pre-push check.
+ci: lint typecheck security test-cov  ## Run the full CI suite locally
+	@echo ""
+	@echo "✓ Local CI suite passed."
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage

@@ -8,17 +8,14 @@ Logo disimpan di /storage/tenants/{tenant_id}/logo.{ext}
 import os
 import re
 import uuid
-from datetime import datetime
-from app.core.security import utcnow
-from typing import Optional, Tuple
 from pathlib import Path
 
-from sqlalchemy.orm import Session
 from PIL import Image
+from sqlalchemy.orm import Session
 
-from app.models.tenant import Tenant
+from app.core.security import utcnow
 from app.models.audit import AuditLog
-
+from app.models.tenant import Tenant
 
 # ===== Constants =====
 STORAGE_ROOT = Path("storage")
@@ -63,7 +60,7 @@ def _validate_logo_file(filename: str, content_type: str, size: int) -> str:
     return ext
 
 
-def _resize_logo_if_needed(input_path: Path, output_path: Path) -> Tuple[int, int]:
+def _resize_logo_if_needed(input_path: Path, output_path: Path) -> tuple[int, int]:
     """
     Resize logo jika dimensi > MAX_LOGO_DIMENSION.
     Untuk SVG, skip resize (vector).
@@ -84,7 +81,7 @@ def _resize_logo_if_needed(input_path: Path, output_path: Path) -> Tuple[int, in
             img.save(output_path, optimize=True)
         return img.size
     except Exception as e:
-        raise ValueError(f"Gagal proses gambar: {e}")
+        raise ValueError(f'Gagal proses gambar: {e}') from e
 
 
 def upload_logo(
@@ -159,9 +156,9 @@ def upload_logo(
 def update_branding(
     db: Session,
     tenant: Tenant,
-    primary_color: Optional[str] = None,
-    secondary_color: Optional[str] = None,
-    footer_text: Optional[str] = None,
+    primary_color: str | None = None,
+    secondary_color: str | None = None,
+    footer_text: str | None = None,
     actor_user_id: int = 0,
 ) -> Tenant:
     """
@@ -190,7 +187,7 @@ def update_branding(
     return tenant
 
 
-def get_logo_path(tenant: Tenant) -> Optional[Path]:
+def get_logo_path(tenant: Tenant) -> Path | None:
     """Return absolute path to tenant logo, or None."""
     if not tenant.logo_url:
         return None

@@ -2,23 +2,47 @@
 FLIPUS v1.1 — WhatsApp notifier via Fonnte API
 """
 
+import logging
 import os
-from typing import Optional
+
 from dotenv import load_dotenv
+
 load_dotenv()
-import requests
-from app.utils.number_to_words import terbilang as rupiah_to_words
+import requests  # noqa: E402
+
+from app.utils.number_to_words import terbilang as rupiah_to_words  # noqa: E402
+
+# FASE 5 Sprint 1 — module-level structured logger.
+log = logging.getLogger("flipus.whatsapp")
 
 
+# FASE 5 Sprint 2 — Prometheus metric helper untuk WhatsApp blast.
+# Lazy import supaya import-time safety; kalau prometheus_client hilang,
+# metric call no-op tanpa raise.
+def _record_wa_blast_metric(target_role: str, status: str) -> None:
+    """Increment `flipus_wa_blast_total` counter untuk observability."""
+    try:
+        from app.core.metrics import record_wa_blast
+        # Normalize status ke vocabulary yang sudah didefinisikan di metrics:
+        # sent | failed | error | skipped | timeout. Anything else → "error".
+        if status not in ("sent", "failed", "error", "skipped", "timeout"):
+            outcome = "error"
+        else:
+            outcome = status
+        record_wa_blast(target_role=target_role or "unknown", outcome=outcome)
+    except Exception:
+        # Observability tidak boleh block business logic.
+        logging.getLogger("flipus.whatsapp").exception("record_wa_blast gagal (metrics only); business logic selesai")
 
-def _append_branding_footer(msg: str, footer_text: Optional[str] = None) -> str:
+
+def _append_branding_footer(msg: str, footer_text: str | None = None) -> str:
     """Append optional footer text + signature kalau ada."""
     if footer_text:
         msg += f"\n\n_{footer_text}_"
     return msg
 
 
-def _get_greeting_with_branding(nama: str, nama_jemaat: Optional[str] = None) -> str:
+def _get_greeting_with_branding(nama: str, nama_jemaat: str | None = None) -> str:
     """Standard greeting dengan nama jemaat opsional."""
     if nama_jemaat:
         return f"*SELAMAT DATANG DI FLIPUS*\n\nGMAHK {nama_jemaat}\n\nShalom {nama},\n\n"
@@ -32,15 +56,20 @@ def send_kuitansi_whatsapp(
     pt: int,
     porsi_misi: int,
     porsi_jemaat: int,
+    target_role: str = "majelis",
 ) -> dict:
     token = os.getenv("FONNTE_TOKEN", "")
     enabled = os.getenv("WHATSAPP_ENABLED", "false").lower() == "true"
 
     if not enabled:
-        return {"status": "skipped", "reason": "WHATSAPP_ENABLED=false di .env"}
+        ret = {"status": "skipped", "reason": "WHATSAPP_ENABLED=false di .env"}
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
 
     if not token or token.startswith("paste_"):
-        return {"status": "error", "reason": "FONNTE_TOKEN belum diisi di .env"}
+        ret = {"status": "error", "reason": "FONNTE_TOKEN belum diisi di .env"}
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
 
     phone_clean = phone.replace("+", "").replace(" ", "").replace("-", "")
     if phone_clean.startswith("0"):
@@ -72,18 +101,28 @@ def send_kuitansi_whatsapp(
             timeout=30,
         )
         result = resp.json()
-        return {
+        ret = {
             "status": "sent" if result.get("status") else "failed",
             "phone": phone_clean,
             "fonnte_response": result,
         }
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
     except Exception as e:
-        return {"status": "error", "reason": str(e), "phone": phone_clean}
+        ret = {"status": "error", "reason": str(e), "phone": phone_clean}
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
 
-def send_simple_message(phone: str, message: str) -> dict:
+def send_simple_message(
+    phone: str,
+    message: str,
+    target_role: str = "general",
+) -> dict:
     token = os.getenv("FONNTE_TOKEN", "")
     if not token:
-        return {"status": "error", "reason": "no token"}
+        ret = {"status": "error", "reason": "no token"}
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
 
     phone_clean = phone.replace("+", "").replace(" ", "")
     if phone_clean.startswith("0"):
@@ -96,16 +135,24 @@ def send_simple_message(phone: str, message: str) -> dict:
             data={"target": phone_clean, "message": message, "countryCode": "62"},
             timeout=30,
         )
-        return resp.json()
+        ret = resp.json()
+        # Normalize status untuk metrics — Fonnte reply punya 'status': true/false
+        if isinstance(ret, dict) and "status" in ret and ret["status"] in (True, False):
+            ret = {**ret, "status": "sent" if ret["status"] else "failed"}
+        _record_wa_blast_metric(target_role=target_role, status=ret.get("status", "error"))
+        return ret
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        ret = {"status": "error", "reason": str(e)}
+        _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+        return ret
 
 
 def send_document_message(
     phone: str,
     message: str,
     file_path: str,
-    filename: Optional[str] = None,
+    filename: str | None = None,
+    target_role: str = "blast",
 ) -> dict:
     """
     Kirim dokumen (PDF) via Fonnte dengan multipart upload.
@@ -128,7 +175,6 @@ def send_document_message(
         dict {status: 'sent'/'failed'/'error'/'skipped', phone, filename, fonnte_response, reason}
     """
     import logging
-    import sys as _sys
     import time as _time
 
     log = logging.getLogger("flipus.whatsapp")
@@ -143,28 +189,20 @@ def send_document_message(
 
     if not enabled:
         msg = "WHATSAPP_ENABLED=false di .env (blast di-skip)"
-        print(f"[WA] {msg} phone={phone_clean}", file=_sys.stderr)
-        log.warning(msg)
-        return {"status": "skipped", "reason": msg, "phone": phone_clean}
+        log.warning(msg, extra={"wa_event": "blast_skipped", "phone": phone_clean})
 
     if not token or token.startswith("paste_"):
         msg = "FONNTE_TOKEN belum diisi di .env"
-        print(f"[WA] {msg} phone={phone_clean}", file=_sys.stderr)
-        log.warning(msg)
-        return {"status": "error", "reason": msg, "phone": phone_clean}
+        log.warning(msg, extra={"wa_event": "missing_token", "phone": phone_clean})
 
     if not phone_clean or phone_clean in ("0", "62"):
         msg = f"Nomor WhatsApp target kosong/invalid: {phone!r}"
-        print(f"[WA] {msg}", file=_sys.stderr)
-        log.warning(msg)
-        return {"status": "error", "reason": msg, "phone": phone_clean}
+        log.warning(msg, extra={"wa_event": "invalid_phone", "phone": phone_clean, "raw_phone": phone})
 
     p = Path(file_path)
     if not p.exists():
         msg = f"File PDF tidak ditemukan: {file_path}"
-        print(f"[WA] {msg}", file=_sys.stderr)
-        log.warning(msg)
-        return {"status": "error", "reason": msg, "phone": phone_clean}
+        log.warning(msg, extra={"wa_event": "file_not_found", "phone": phone_clean, "file_path": str(file_path)})
 
     fname = filename or p.name
 
@@ -194,12 +232,7 @@ def send_document_message(
                     or result.get("message")
                     or "Fonnte reply tanpa field 'status=true'"
                 )
-            print(
-                f"[WA] blast phone={phone_clean} attempt={attempt}/{max_retries} "
-                f"status={'sent' if ok else 'failed'} reason={reason!r}",
-                file=_sys.stderr,
-            )
-            log.info(f"blast phone={phone_clean} attempt={attempt} ok={ok} reason={reason!r}")
+            log.info(f"blast phone={phone_clean} attempt={attempt} ok={ok} reason={reason!r}", extra={"wa_event": "blast_attempt", "phone": phone_clean, "attempt": attempt, "max_retries": max_retries, "sent": ok, "reason": str(reason)[:200]})
             ret = {
                 "status": "sent" if ok else "failed",
                 "phone": phone_clean,
@@ -212,50 +245,43 @@ def send_document_message(
             # Skip sleep kalau ini adalah call terakhir di batch (caller bisa set _suppress_rate_sleep)
             if not getattr(send_document_message, "_suppress_rate_sleep", False):
                 _time.sleep(rate_sleep)
+            _record_wa_blast_metric(target_role=target_role, status=ret["status"])
             return ret
         except requests.exceptions.Timeout as e:
             last_exc = e
             wait = base_backoff * (2 ** (attempt - 1))
-            print(
-                f"[WA] blast phone={phone_clean} attempt={attempt}/{max_retries} TIMEOUT, "
-                f"retry dalam {wait:.1f}s",
-                file=_sys.stderr,
-            )
-            log.warning(f"blast timeout attempt {attempt}: {e}")
+            log.warning(f"blast timeout attempt {attempt}: {e}", extra={"wa_event": "blast_timeout", "phone": phone_clean, "attempt": attempt, "wait_seconds": round(wait, 2)})
             if attempt < max_retries:
                 _time.sleep(wait)
         except requests.exceptions.ConnectionError as e:
             last_exc = e
             wait = base_backoff * (2 ** (attempt - 1))
-            print(
-                f"[WA] blast phone={phone_clean} attempt={attempt}/{max_retries} CONNECTION_ERROR, "
-                f"retry dalam {wait:.1f}s: {e}",
-                file=_sys.stderr,
-            )
             log.warning(f"blast conn error attempt {attempt}: {e}")
             if attempt < max_retries:
                 _time.sleep(wait)
         except Exception as e:
             # Unexpected — tidak retry
             msg = f"{type(e).__name__}: {e}"
-            print(f"[WA] blast error phone={phone_clean} {msg}", file=_sys.stderr)
             log.error(f"blast error {msg}")
-            return {
+            ret = {
                 "status": "error", "reason": msg, "phone": phone_clean, "filename": fname,
                 "attempts": attempt,
             }
+            _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+            return ret
 
     # All retries exhausted
     msg = (
         f"Gagal setelah {max_retries} attempt (last error: "
         f"{type(last_exc).__name__ if last_exc else 'unknown'}: {last_exc})"
     )
-    print(f"[WA] blast phone={phone_clean} EXHAUSTED: {msg}", file=_sys.stderr)
     log.error(msg)
-    return {
+    ret = {
         "status": "failed", "reason": msg, "phone": phone_clean, "filename": fname,
         "attempts": max_retries,
     }
+    _record_wa_blast_metric(target_role=target_role, status=ret["status"])
+    return ret
 
 
 def send_auto_thanks(
@@ -411,7 +437,7 @@ def get_device_status() -> dict:
         try:
             logging.getLogger("flipus.whatsapp").error(log_msg)
         except Exception:
-            pass
+            logging.getLogger("flipus.whatsapp").exception("logger.error gagal saat catat get_device_status error")
         return {
             "status": "error",
             "device": None,

@@ -16,33 +16,30 @@ Flow:
    → /2fa/verify dengan code pertama → enabled=True + backup_codes ditampilkan SEKALI
 """
 
-from datetime import datetime
-from app.core.security import utcnow
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.v1.auth import decode_access_token, get_current_user
 from app.core.database import get_db
-from app.api.v1.auth import get_current_user, decode_access_token
 from app.core.security import (
     create_access_token,
+    utcnow,
     verify_password,
-    hash_password,
 )
-from app.models.user import User
-from app.models.tenant import Tenant
 from app.models.audit import AuditLog
+from app.models.tenant import Tenant
+from app.models.user import User
 from app.services.twofa_service import (
-    generate_secret,
     build_setup_response,
-    encrypt_secret,
     decrypt_secret,
-    verify_totp,
+    encrypt_secret,
     generate_backup_codes,
+    generate_secret,
     hash_backup_codes,
     verify_backup_code,
+    verify_totp,
 )
 
 router = APIRouter()
@@ -62,13 +59,13 @@ class TwoFactorSetupOut(BaseModel):
 class TwoFactorVerifyIn(BaseModel):
     """Verify first TOTP code untuk enable 2FA."""
     totp_code: str
-    backup_codes_visible: Optional[bool] = True  # include backup codes di response
+    backup_codes_visible: bool | None = True  # include backup codes di response
 
 
 class TwoFactorVerifyOut(BaseModel):
     enabled: bool
     enabled_at: str
-    backup_codes: List[str] = []  # SHOWN ONCE — user harus save offline
+    backup_codes: list[str] = []  # SHOWN ONCE — user harus save offline
     message: str
 
 
@@ -79,7 +76,7 @@ class TwoFactorDisableIn(BaseModel):
 
 
 class TwoFactorBackupCodesOut(BaseModel):
-    backup_codes: List[str]
+    backup_codes: list[str]
     generated_at: str
 
 
@@ -92,8 +89,8 @@ class TwoFactorLoginIn(BaseModel):
 class TwoFactorStatusOut(BaseModel):
     is_2fa_enabled: bool
     backup_codes_remaining: int
-    twofa_enabled_at: Optional[str] = None
-    last_2fa_used_at: Optional[str] = None
+    twofa_enabled_at: str | None = None
+    last_2fa_used_at: str | None = None
 
 
 # ===== Endpoints =====

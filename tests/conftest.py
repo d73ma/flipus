@@ -13,13 +13,14 @@ Run specific suite:
 """
 
 import os
+
 import pytest
-from datetime import datetime
-from app.core.security import utcnow
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from app.core.security import utcnow
 
 # Set test env BEFORE importing app
 os.environ["DATABASE_URL_LOCAL"] = "sqlite:///./test_flipus_t25.db"
@@ -29,16 +30,13 @@ os.environ["SECRET_KEY"] = "test-secret-key-t25-do-not-use-in-prod"
 os.environ["PII_ENCRYPTION_KEY"] = "WW7LHfY_bmiNjXAiTZjmHI4w_wwPQH-_x9U722_FCDY="
 os.environ["LICENSE_TENANT_SIGNATURE_SALT"] = "test-salt-t25"
 
-from app.main import app
 from app.core.database import Base, get_db
-from app.core.security import hash_password, generate_tenant_signature
+from app.core.security import generate_tenant_signature, hash_password
+from app.main import app
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
 from app.models.tenant import Tenant
-from app.models.user import User
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-from app.models.audit import AuditLog
 from app.models.transaction import Kuitansi
-from app.models.notification import Notification
-
+from app.models.user import User
 
 # ===== DB Fixture =====
 
@@ -249,8 +247,13 @@ def admin_uni(test_db, jemaat_a, uni_dk):
 
 
 @pytest.fixture(scope="function")
-def auditor_misi(test_db, jemaat_a, misi_minahasa):
-    """Auditor Misi — scope all jemaat in misi."""
+def auditor_misi(test_db, jemaat_a):
+    """Auditor Misi — scope all jemaat in misi via tenant.misi_konferens_id chain.
+
+    Auditor Misi diletakkan di jemaat_a (yang punya misi_konferens_id=misi_minahasa.id).
+    TenantScope.resolve_visible_tenants akan follow: caller_tenant.misi_konferens_id
+    → semua Tenant dg misi_konferens_id yg sama visible.
+    """
     db = test_db()
     u = User(
         username="auditor_misi",
@@ -259,7 +262,6 @@ def auditor_misi(test_db, jemaat_a, misi_minahasa):
         role="AUDITOR_MISI",
         tenant_id=jemaat_a.id,
         is_active=True,
-        misi_konferens_id=misi_minahasa.id,
     )
     db.add(u)
     db.commit()

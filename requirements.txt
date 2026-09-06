@@ -27,3 +27,17 @@ limits[redis]==3.13.0
 mypy==1.13.0
 pytest-cov==5.0.0
 ruff==0.7.4
+
+# FASE 5 Sprint 2 — Prometheus metrics
+prometheus_client==0.21.1
+prometheus-fastapi-instrumentator==7.0.0
+
+# FASE 5 Sprint 3 — Security tooling (used in CI)
+# bandit: AST-based security linter for common Python vulns (eval,
+#         subprocess shell=True, weak hash, etc.). Pure offline.
+bandit==1.7.10
+# pip-audit: official PyPA tool. Audits installed deps against the OSV /
+#            PyPI Advisory DB. Works offline after first download of the
+#            vulnerability snapshot. Replaces safety (which went
+#            commercial in v3 and now requires an API key).
+pip-audit==2.7.3

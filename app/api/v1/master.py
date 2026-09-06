@@ -9,21 +9,24 @@ POST   /api/v1/master/persentase                   → update PersentaseConfig (
 POST   /api/v1/master/seed                         → seed 3 Uni + 12 Misi (Jerry-only)
 """
 
-from typing import List, Optional
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.core.cache import cached, invalidate_cache
-from app.core.security import require_admin_bootstrap_dependency
 from app.api.v1.auth import get_current_user
-from app.models.master import Uni, MisiKonferens, PersentaseConfig
-from app.models.tenant import Tenant
+from app.core.cache import cached, invalidate_cache
+from app.core.database import get_db
+from app.core.security import require_admin_bootstrap_dependency
 from app.models.audit import AuditLog
+from app.models.master import MisiKonferens, PersentaseConfig, Uni
+from app.models.tenant import Tenant
 
 router = APIRouter()
+
+# FASE 5 Sprint 1 — module-level structured logger.
+_logger = logging.getLogger("app.api.v1.master")
 
 
 class UniOut(BaseModel):
@@ -44,7 +47,7 @@ class MisiOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-@router.get("/uni", tags=['Master'], response_model=List[UniOut])
+@router.get("/uni", tags=['Master'], response_model=list[UniOut])
 def list_uni(db: Session = Depends(get_db)):
     """Public — list 3 Uni untuk dropdown form registrasi."""
     # Cache 10 menit — Uni jarang berubah
@@ -56,9 +59,9 @@ def _cached_list_uni(db: Session):
     return db.query(Uni).order_by(Uni.id).all()
 
 
-@router.get("/misi", tags=['Master'], response_model=List[MisiOut])
+@router.get("/misi", tags=['Master'], response_model=list[MisiOut])
 def list_misi(
-    uni_id: Optional[int] = None,
+    uni_id: int | None = None,
     db: Session = Depends(get_db),
 ):
     """Public — list Misi. Filter by uni_id jika ada."""
@@ -66,7 +69,7 @@ def list_misi(
 
 
 @cached(ttl_seconds=600)
-def _cached_list_misi(db: Session, uni_id: Optional[int] = None):
+def _cached_list_misi(db: Session, uni_id: int | None = None):
     q = db.query(MisiKonferens)
     if uni_id is not None:
         q = q.filter(MisiKonferens.uni_id == uni_id)
@@ -174,7 +177,7 @@ class PersentaseConfigOut(BaseModel):
     pct_x_uni: float
     pct_pt_uni: float
     pct_khusus_uni: float
-    updated_at: Optional[str]
+    updated_at: str | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -308,9 +311,19 @@ def update_persentase_config(
     if payload.scope not in ("MISI", "UNI"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "scope harus 'MISI' atau 'UNI'")
 
-    # T86 DEBUG (2026-08-23): Log role untuk diagnose error "Hanya Auditor..."
-    import sys
-    print(f"[DEBUG master.py POST] user_id={current.get('id')} role={current.get('role')!r} tenant_id={current.get('tenant_id')} scope={payload.scope} ref_id={payload.ref_id} pj_x={payload.pct_x_jemaat}", file=sys.stderr, flush=True)
+    # T86 DEBUG (2026-08-23) — FASE 5 S1: switched print() → structured logger.
+    _logger.debug(
+        "master POST persentase diagnostic",
+        extra={
+            "debug": True,
+            "user_id": current.get("id"),
+            "role": current.get("role"),
+            "caller_tenant_id": current.get("tenant_id"),
+            "scope": payload.scope,
+            "ref_id": payload.ref_id,
+            "pct_x_jemaat": payload.pct_x_jemaat,
+        },
+    )
 
     if current["role"] == "AUDITOR_MISI":
         if payload.scope != "MISI":

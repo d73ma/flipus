@@ -10,7 +10,8 @@ Aturan Jerry (2026-09-01):
 - Custom kategori: Bendahara/Admin bisa tambah via UI
 - Scope: per tenant (jemaat lokal)
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, DateTime, Index, func, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+
 from app.core.database import Base
 
 

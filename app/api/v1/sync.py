@@ -1,29 +1,23 @@
 """FLIPUS v1.1 — Sync API."""
 import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
+
+from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.models.transaction import Kuitansi
-from app.models.tenant import Tenant
-from app.models.user import User
 from app.core.tenant_scope import TenantScope, require_tenant_scope
 from app.models.audit import AuditLog
 from app.models.sync import SyncOutbox
+from app.models.tenant import Tenant
+from app.models.transaction import Kuitansi
+from app.models.user import User
 from app.services.anonymizer import anonymize_batch, verify_hash
 
 router = APIRouter(tags=["sync"])
 security = HTTPBearer(auto_error=False)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(security),
@@ -54,7 +48,7 @@ def upload_sync(db: Session = Depends(get_db), scope: TenantScope = Depends(requ
     kuitansi_list = (
         db.query(Kuitansi)
         .filter(Kuitansi.tenant_id == tenant.id)
-        .filter(Kuitansi.is_purged == False)
+        .filter(Kuitansi.is_purged == False)  # noqa: E712
         .all()
     )
     payloads = anonymize_batch(kuitansi_list, tenant.nama_jemaat_lokal)
@@ -95,7 +89,7 @@ def pull_sync(since: str = None, db: Session = Depends(get_db), scope: TenantSco
             since_dt = datetime.fromisoformat(since)
             q = q.filter(SyncOutbox.created_at >= since_dt)
         except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "since harus ISO datetime")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, 'since harus ISO datetime') from None
     rows = q.order_by(SyncOutbox.created_at.asc()).all()
     items = []
     for r in rows:
@@ -105,7 +99,7 @@ def pull_sync(since: str = None, db: Session = Depends(get_db), scope: TenantSco
         payload["sync_outbox_id"] = r.id
         payload["tenant_id"] = r.tenant_id
         items.append(payload)
-        r.pulled_at = datetime.now(timezone.utc)
+        r.pulled_at = datetime.now(UTC)
     audit = AuditLog(
         tenant_id=scope.primary_tenant_id,
         action="SYNC_PULL_user_{}_count_{}".format(scope.user_id, len(items)),

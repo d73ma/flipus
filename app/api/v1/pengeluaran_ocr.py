@@ -7,31 +7,29 @@ Pattern sama dengan M1 scanner.py tapi khusus nota pembayaran (bukan amplop pers
 - Simpan sebagai Pengeluaran dengan created_via='ocr', status='draft' (Bendahara review dulu)
 - Bukti_path = path file upload
 """
-import os
-import uuid
-import shutil
 import base64
 import json
 import logging
+import os
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.tenant_scope import (
-    TenantScope, require_tenant_scope,
+    TenantScope,
+    require_tenant_scope,
 )
 from app.core.upload_validator import validate_struk_ocr
-from app.models.pengeluaran import Pengeluaran
-from app.models.kategori_pengeluaran import KategoriPengeluaran
-from app.models.tenant import Tenant
 from app.models.audit import AuditLog
+from app.models.kategori_pengeluaran import KategoriPengeluaran
+from app.models.pengeluaran import Pengeluaran
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +61,14 @@ class OcrPengeluaranItem(BaseModel):
     penerima: str = ""
     kategori_hint: str = ""
     deskripsi: str = ""
-    tanggal_nota: Optional[str] = None
-    raw_ocr: Optional[str] = ""
+    tanggal_nota: str | None = None
+    raw_ocr: str | None = ""
     ocr_status: str = "NEED_REVIEW"
 
 
 class OcrPengeluaranBatchOut(BaseModel):
     total_files: int
-    items: List[OcrPengeluaranItem]
+    items: list[OcrPengeluaranItem]
 
 
 def _extract_with_ollama(image_path: str) -> dict:
@@ -109,7 +107,7 @@ def _extract_with_ollama(image_path: str) -> dict:
         return {"jumlah": 0, "penerima": "", "kategori_hint": "lainnya", "deskripsi": f"OLLAMA_ERROR: {type(exc).__name__}", "tanggal_nota": None, "raw": ""}
 
 
-def _match_kategori(db: Session, tenant_id: int, hint: str) -> Optional[int]:
+def _match_kategori(db: Session, tenant_id: int, hint: str) -> int | None:
     """Coba match kategori dari hint. Return kategori_pengeluaran_id atau None."""
     if not hint:
         return None
@@ -125,7 +123,7 @@ def _match_kategori(db: Session, tenant_id: int, hint: str) -> Optional[int]:
         k = db.query(KategoriPengeluaran).filter(
             KategoriPengeluaran.tenant_id == tenant_id,
             KategoriPengeluaran.alias == target_alias,
-            KategoriPengeluaran.is_aktif == True,
+            KategoriPengeluaran.is_aktif == True,  # noqa: E712
         ).first()
         if k:
             return k.id
@@ -134,7 +132,7 @@ def _match_kategori(db: Session, tenant_id: int, hint: str) -> Optional[int]:
 
 @router.post("/pengeluaran/ocr-batch-upload", tags=['Pengeluaran'], response_model=OcrPengeluaranBatchOut)
 async def ocr_batch_upload(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -187,8 +185,8 @@ async def ocr_batch_upload(
         raise
     except Exception as exc:
         import traceback as _tb
-        print(f"[OCR-PENG-UPLOAD] FATAL: {type(exc).__name__}: {exc}\n{_tb.format_exc()}", flush=True)
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OCR batch-upload gagal: {type(exc).__name__}: {exc}")
+        logger.exception(f"[OCR-PENG-UPLOAD] FATAL: {type(exc).__name__}: {exc}\n{_tb.format_exc()}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"OCR batch-upload gagal: {type(exc).__name__}: {exc}") from exc
 
 
 class OcrPengeluaranSaveIn(BaseModel):
@@ -197,9 +195,9 @@ class OcrPengeluaranSaveIn(BaseModel):
     jumlah: int
     penerima: str
     kategori_pengeluaran_id: int
-    deskripsi: Optional[str] = ""
-    metode_bayar: Optional[str] = "tunai"
-    tanggal: Optional[str] = None  # default today
+    deskripsi: str | None = ""
+    metode_bayar: str | None = "tunai"
+    tanggal: str | None = None  # default today
 
 
 class OcrPengeluaranSaveOut(BaseModel):

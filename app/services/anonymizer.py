@@ -6,6 +6,7 @@ Sesuai policy privasi GMAHK UKIKT: hanya agregat yang dikirim.
 """
 import hashlib
 import json
+
 from app.models.transaction import Kuitansi
 
 # Field PII yang JANGAN pernah dikirim ke Kantor Misi / Uni

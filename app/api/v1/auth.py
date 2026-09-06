@@ -1,37 +1,44 @@
 """
+
 Auth: login + JWT issuance + role + license guard (anti-clone, integrated)
 + forgot password endpoint (self-service reset via WA)
 + tenant status guard (Tahap 20 SaaS)
 + login lockout (v1.4 hardening) — 5 attempts → 15 min lock.
 """
-from datetime import datetime, timedelta, timezone
-from app.core.config import settings
-from app.core.security import utcnow
-from typing import Optional
+
+import logging
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limiter import limiter as _rate_limiter
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_access_token,
     generate_tenant_signature,
     hash_password,
+    utcnow,
     verify_password,
 )
-from app.core.rate_limiter import limiter as _rate_limiter
-from app.models.user import User
-from app.models.tenant import Tenant
 from app.models.audit import AuditLog
-from app.models.revoked_token import RevokedToken
+
 # FASE 3-S3.S8 — refresh token server-side store.
 from app.models.refresh_token import RefreshToken
-from app.utils.password_gen import generate_random_password, mask_password, validate_password_strength
-from app.services.whatsapp import send_simple_message
+from app.models.revoked_token import RevokedToken
+from app.models.tenant import Tenant
+from app.models.user import User
 from app.services.tenant_service import slugify
+from app.services.whatsapp import send_simple_message
+from app.utils.password_gen import generate_random_password, mask_password, validate_password_strength
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -45,8 +52,8 @@ MANDATORY_2FA_ROLES = {"ADMIN_UNI", "AUDITOR_MISI"}
 class LoginIn(BaseModel):
     username: str
     password: str
-    tenant_slug: Optional[str] = None  # Tahap 20: optional tenant hint for SaaS
-    totp_code: Optional[str] = None  # T23-7: 2FA code (optional, kalau user sudah enable)
+    tenant_slug: str | None = None  # Tahap 20: optional tenant hint for SaaS
+    totp_code: str | None = None  # T23-7: 2FA code (optional, kalau user sudah enable)
 
 
 class TokenOut(BaseModel):
@@ -59,8 +66,8 @@ class TokenOut(BaseModel):
     expires_in: int = 900
     role: str
     tenant_id: int
-    tenant_slug: Optional[str] = None
-    tenant_status: Optional[str] = None
+    tenant_slug: str | None = None
+    tenant_status: str | None = None
 
 
 class TwoFactorRequiredOut(BaseModel):
@@ -74,7 +81,7 @@ class TwoFactorLoginIn(BaseModel):
     """Step 2: submit TOTP code dengan partial_token."""
     partial_token: str
     totp_code: str
-    backup_code: Optional[str] = None  # alternatif kalau TOTP device hilang
+    backup_code: str | None = None  # alternatif kalau TOTP device hilang
 
 
 class TwoFactorDisableIn(BaseModel):
@@ -86,13 +93,13 @@ class TwoFactorDisableIn(BaseModel):
 class ForgotPasswordIn(BaseModel):
     """Input boleh username ATAU nomor_whatsapp (auto-detect)."""
     identifier: str  # username OR nomor_wa
-    tenant_slug: Optional[str] = None  # Tahap 20: scope forgot-password by tenant
+    tenant_slug: str | None = None  # Tahap 20: scope forgot-password by tenant
 
 class ForgotPasswordOut(BaseModel):
     status: str  # "sent" / "not_found" / "rate_limited" / "no_wa"
     identifier: str
     message: str
-    new_password_masked: Optional[str] = None  # cuma untuk audit (masked)
+    new_password_masked: str | None = None  # cuma untuk audit (masked)
 
 
 def _audit_cross_tenant_attempt(
@@ -186,7 +193,7 @@ def _notify_security_event_wa(
             send_simple_message(admin.nomor_whatsapp, msg)
         except Exception:
             # Best-effort — kalau WA gagal, audit log sudah ada
-            pass
+            logger.exception("send_simple_message (admin notify) gagal; audit log tetap dicatat")
 
 
 # ===== Login Lockout (v1.4 hardening) =====
@@ -230,7 +237,7 @@ def _record_failed_login(db: Session, username: str, tenant_id: int) -> None:
 
 
 def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme),
+    token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> dict:
     """
@@ -263,10 +270,10 @@ def get_current_user(
     iat_ts = payload.get("iat")
     pwd_changed = getattr(user, "password_changed_at", None)
     if iat_ts and pwd_changed:
-        iat_dt = datetime.fromtimestamp(iat_ts, tz=timezone.utc)
+        iat_dt = datetime.fromtimestamp(iat_ts, tz=UTC)
         # Strip tz info dari pwd_changed kalau naive
         if pwd_changed.tzinfo is None:
-            pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+            pwd_changed = pwd_changed.replace(tzinfo=UTC)
         if iat_dt < pwd_changed:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
@@ -473,7 +480,7 @@ def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
             try:
                 secret = decrypt_secret(user.totp_secret_encrypted)
             except Exception:
-                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gagal decrypt TOTP secret")
+                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, 'Gagal decrypt TOTP secret') from None
             if not verify_totp(secret, data.totp_code):
                 # Try backup code
                 from app.services.twofa_service import verify_backup_code
@@ -595,7 +602,7 @@ def _persist_refresh_token(db: Session, refresh_jwt: str, user: User, request: R
     exp_ts = payload.get("exp")
     if not jti or not exp_ts:
         return  # defensive — tidak bisa store tanpa JTI/exp
-    expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+    expires_at = datetime.fromtimestamp(exp_ts, tz=UTC)
     row = RefreshToken(
         jti=jti,
         user_id=user.id,
@@ -829,7 +836,7 @@ def refresh(
             RefreshToken.revoked_at.is_(None),
         ).all()
         for r in all_rt:
-            r.revoked_at = datetime.now(timezone.utc)
+            r.revoked_at = datetime.now(UTC)
             r.revoked_reason = "reuse_detected"
         db.add(AuditLog(
             tenant_id=rt.tenant_id,
@@ -855,7 +862,7 @@ def refresh(
         )
 
     # SUCCESS — rotate.
-    rt.used_at = datetime.now(timezone.utc)
+    rt.used_at = datetime.now(UTC)
     rt.redeemed_ip = _client_ip(request)
     rt.redeemed_user_agent = (request.headers.get("user-agent") or "")[:255]
 
@@ -925,7 +932,7 @@ def logout(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token tidak punya JTI (legacy token, silakan login ulang)")
 
     # Convert exp timestamp → datetime UTC
-    expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at = datetime.fromtimestamp(exp_ts, tz=UTC) if exp_ts else datetime.now(UTC) + timedelta(hours=24)
 
     # Idempotent — kalau sudah pernah di-revoke, return success tanpa duplicate row
     existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
@@ -954,7 +961,7 @@ def logout(
         RefreshToken.used_at.is_(None),
     ).all()
     for rt in rt_rows:
-        rt.revoked_at = datetime.now(timezone.utc)
+        rt.revoked_at = datetime.now(UTC)
         rt.revoked_reason = "logout_access_token"
 
     # Audit log
@@ -1006,7 +1013,6 @@ def change_password(
     5. Audit log (T4 — enhanced dengan IP address + user-agent untuk forensic) + notify WA ke user (best-effort)
     """
     from app.core.security import hash_password, verify_password
-    from app.utils.password_gen import validate_password_strength
 
     # 1) current password check
     user = db.query(User).filter(User.id == current["id"]).first()
@@ -1028,7 +1034,7 @@ def change_password(
 
     # 4) Update hash
     user.password_hash = hash_password(data.new_password)
-    user.last_password_change_at = datetime.now(timezone.utc)
+    user.last_password_change_at = datetime.now(UTC)
 
     # 5) Auto-revoke semua token user ini (logout semua device)
     # Catatan: tidak punya list JTI — solusi: tambah kolom user_id ke revoked_tokens
@@ -1036,7 +1042,7 @@ def change_password(
     # increment "token_epoch" di user, dan validasi token mengandung epoch matching.
     # Untuk simplicity v1.5-D: pakai password_changed_at sebagai invalidation timestamp.
     # Token yang iat < password_changed_at akan ditolak di get_current_user.
-    user.password_changed_at = datetime.now(timezone.utc)
+    user.password_changed_at = datetime.now(UTC)
 
     # FASE 3-S2.T4 — Audit log ENHANCED dengan IP + UA untuk forensic.
     # Audit log ini penting kalau akun dibajak — attacker biasanya ganti password
@@ -1063,13 +1069,13 @@ def change_password(
             send_simple_message(
                 target=user.nomor_whatsapp,
                 message=(
-                    f"🔐 Password FLIPUS Anda telah diganti pada {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}.\n"
+                    f"🔐 Password FLIPUS Anda telah diganti pada {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}.\n"
                     f"Semua session lama otomatis logout. "
                     f"Jika ini BUKAN Anda, hubungi Admin Uni SEGERA."
                 ),
             )
         except Exception:
-            pass  # best-effort
+            logger.exception("send_simple_message (change-password notify) gagal")  # best-effort
 
     return ChangePasswordOut(
         status="ok",

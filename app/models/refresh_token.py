@@ -29,7 +29,7 @@ Rotation pattern:
 Saat request berikutnya pakai jti=A lagi → sudah used → reject.
 Saat jti=A pertama kali dipakai → mark used_at dan issue jti=B.
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Index
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.sql import func
 
 from app.core.database import Base

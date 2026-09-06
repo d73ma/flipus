@@ -12,13 +12,12 @@ Aturan alias generator (Jerry 2026-08-27):
 Validasi nama kategori: max 30 char, alphanumeric + spasi + dash.
 """
 
-import pytest
 
 from app.utils.kategori_alias import (
-    generate_alias,
-    normalize_nama,
-    is_valid_nama,
     _strip_persembahan,
+    generate_alias,
+    is_valid_nama,
+    normalize_nama,
 )
 
 

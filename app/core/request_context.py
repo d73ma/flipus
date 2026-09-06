@@ -16,18 +16,36 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from app.core.logger import (
-    request_id_var,
-    tenant_id_var,
-    user_id_var,
-    set_request_context,
-)
+from app.core import logger as _logger_mod  # module ref (NOT direct symbol imports)
+
+# to survive `importlib.reload(app.core.logger)`
+# in tests/service hot-reload without splitting
+# the ContextVar identity.
+from app.core.logger import set_request_context
+
+
+# Attribute-style access on _logger_mod ensures every reference goes through the
+# CURRENT module object. After `reload(app.core.logger)` the ContextVar *instances*
+# are recreated, but `request_context.request_id_var` here still points to the OLD
+# ones. By resolving via `_logger_mod.request_id_var` we always read the LIVE one.
+def _rid() -> str:
+    return _logger_mod.request_id_var.get()
+def _set_rid(v: str) -> None:
+    _logger_mod.request_id_var.set(v)
+def _tid() -> str:
+    return _logger_mod.tenant_id_var.get()
+def _set_tid(v: str) -> None:
+    _logger_mod.tenant_id_var.set(v)
+def _uid() -> str:
+    return _logger_mod.user_id_var.get()
+def _set_uid(v: str) -> None:
+    _logger_mod.user_id_var.set(v)
 
 _logger = logging.getLogger("app.core.request_context")
 
@@ -60,7 +78,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         # 3. Set contextvars — request_id + IP. tenant_id/user_id akan
         #    di-set oleh handler setelah auth dependency resolved.
         set_request_context(request_id=request_id, tenant_id=None, user_id=None)
-        request.state.request_id = request_id_var.get()
+        request.state.request_id = _rid()
         request.state.client_ip = client_ip
 
         # 4. Log masuk/keluar request (ringan, level INFO). Menghindari
@@ -75,9 +93,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
             # Update user/tenant jika handler sempat set di state
             if hasattr(request.state, "tenant_id"):
-                tenant_id_var.set(str(request.state.tenant_id))
+                _set_tid(str(request.state.tenant_id))
             if hasattr(request.state, "user_id"):
-                user_id_var.set(str(request.state.user_id))
+                _set_uid(str(request.state.user_id))
 
             if should_log:
                 _logger.info(
@@ -96,7 +114,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                     },
                 )
             # Echo request_id back supaya klien bisa correlation
-            response.headers["X-Request-ID"] = request_id_var.get()
+            response.headers["X-Request-ID"] = _rid()
             return response
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -121,6 +139,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             # Reset contextvars supaya next request tidak inherit
             # (defensive — contextvars sebenarnya auto-reset per task,
             # tapi explicit reset aman untuk threadpool workers)
-            tenant_id_var.set("-")
-            user_id_var.set("-")
-            request_id_var.set("-")
+            _set_tid("-")
+            _set_uid("-")
+            _set_rid("-")

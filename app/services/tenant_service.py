@@ -15,14 +15,12 @@ Slug rules:
 """
 
 import re
-from typing import Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
-from app.models.tenant import Tenant
 from app.core.security import generate_tenant_signature
-
+from app.models.tenant import Tenant
 
 # Reserved slugs (tidak boleh dipakai tenant karena bentrok dgn path API)
 RESERVED_SLUGS = {
@@ -71,7 +69,7 @@ def slugify(name: str, max_len: int = 60) -> str:
     return s
 
 
-def generate_unique_slug(db: Session, nama_jemaat: str, exclude_tenant_id: Optional[int] = None) -> str:
+def generate_unique_slug(db: Session, nama_jemaat: str, exclude_tenant_id: int | None = None) -> str:
     """
     Generate slug unique dari nama_jemaat.
 
@@ -97,17 +95,17 @@ def generate_unique_slug(db: Session, nama_jemaat: str, exclude_tenant_id: Optio
     return f"{base}-{abs(hash(nama_jemaat)) % 100000}"
 
 
-def get_tenant_by_slug(db: Session, slug: str) -> Optional[Tenant]:
+def get_tenant_by_slug(db: Session, slug: str) -> Tenant | None:
     """Lookup tenant by slug (exact match)."""
     return db.query(Tenant).filter(Tenant.slug == slug.strip().lower()).first()
 
 
-def get_tenant_by_subdomain(db: Session, subdomain: str) -> Optional[Tenant]:
+def get_tenant_by_subdomain(db: Session, subdomain: str) -> Tenant | None:
     """Lookup tenant by subdomain (exact match)."""
     return db.query(Tenant).filter(Tenant.subdomain == subdomain.strip().lower()).first()
 
 
-def get_tenant_by_slug_or_subdomain(db: Session, identifier: str) -> Optional[Tenant]:
+def get_tenant_by_slug_or_subdomain(db: Session, identifier: str) -> Tenant | None:
     """Lookup by slug OR subdomain in one query."""
     ident = identifier.strip().lower()
     return (

@@ -21,10 +21,8 @@ Jalankan:
     .venv/bin/python3 -m pytest tests/test_t33_jwt_refresh.py -v
 """
 
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-import pytest
 from jose import jwt
 
 from app.core.config import settings
@@ -34,7 +32,6 @@ from app.core.security import (
     decode_access_token,
 )
 from app.models.refresh_token import RefreshToken
-
 
 # =====================================================================
 # 1) Settings / config
@@ -74,10 +71,10 @@ class TestTokenClaims:
         assert payload["sub"] == "42"
 
     def test_access_token_expiry_about_15_min(self):
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         token = create_access_token({"sub": 1, "role": "BENDAHARA", "tenant_id": 1})
         payload = decode_access_token(token)
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
         delta_sec = (exp - before).total_seconds()
         # ±10 second tolerance
         assert 15 * 60 - 10 <= delta_sec <= 15 * 60 + 10
@@ -91,10 +88,10 @@ class TestTokenClaims:
         assert payload["jti"] != payload.get("iat")  # jti != iat (always uuid)
 
     def test_refresh_token_expiry_about_7_days(self):
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         token = create_refresh_token({"sub": 1, "role": "BENDAHARA", "tenant_id": 1})
         payload = decode_access_token(token)
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
         delta_sec = (exp - before).total_seconds()
         # 7 days ± 10s
         assert 7 * 86400 - 10 <= delta_sec <= 7 * 86400 + 10
@@ -112,8 +109,8 @@ class TestTokenClaims:
             expires_days=1,
         )
         payload = decode_access_token(token)
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-        delta_sec = (exp - datetime.now(timezone.utc)).total_seconds()
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
+        delta_sec = (exp - datetime.now(UTC)).total_seconds()
         assert 86400 - 10 <= delta_sec <= 86400 + 10
 
 
@@ -253,8 +250,8 @@ class TestRefreshEndpoint:
             "iss": "FLIPUS-UKIKT",
             "watermark": "FLIPUS_v1.1",
             "jti": "deadbeef" * 4,  # 32 hex chars, valid format
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(days=7),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(days=7),
         }
         forge_token = jwt.encode(
             forge_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
@@ -273,7 +270,7 @@ class TestRefreshEndpoint:
         # Manually revoke the row
         db = test_db()
         row = db.query(RefreshToken).filter(RefreshToken.jti == jti).first()
-        row.revoked_at = datetime.now(timezone.utc)
+        row.revoked_at = datetime.now(UTC)
         row.revoked_reason = "manual_test_revoke"
         db.commit()
         db.close()
