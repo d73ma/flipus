@@ -51,12 +51,18 @@ def _ensure_aware(dt: datetime | None) -> datetime | None:
     return dt
 
 # === State machine — valid transitions ===
+# FASE 5 S7: tambah "AWAIT_NAMA" sebagai state valid.
+# Sebelumnya AWAIT_KH langsung ke CONFIRM, tapi code di wa_input.py
+# sebenarnya minta nama pemberi (AWAIT_NAMA) setelah KH — lihat
+# _wa_inbound_impl baris 824-838 (AWAIT_KH → AWAIT_NAMA) dan 841+ (AWAIT_NAMA → CONFIRM).
+# Tanpa key ini, set_state("AWAIT_NAMA") raise ValueError("Invalid state").
 VALID_NEXT_STATES = {
-    "IDLE": ["AWAIT_X"],  # ditambah via button "input" atau multi-tenant "pilih_<id>"
+    "IDLE": ["AWAIT_X"],  # via button "input" atau multi-tenant "pilih_<id>"
     "AWAIT_X": ["AWAIT_PT", "IDLE"],  # nominal valid → AWAIT_PT, "Batal" → IDLE
-    "AWAIT_PT": ["AWAIT_KH", "IDLE"],
-    "AWAIT_KH": ["CONFIRM", "IDLE"],
-    "CONFIRM": ["SAVED", "IDLE"],
+    "AWAIT_PT": ["AWAIT_KH", "IDLE"],  # nominal valid → AWAIT_KH
+    "AWAIT_KH": ["AWAIT_NAMA", "IDLE"],  # nominal valid → AWAIT_NAMA (minta nama)
+    "AWAIT_NAMA": ["CONFIRM", "IDLE"],  # nama diberikan → CONFIRM
+    "CONFIRM": ["SAVED", "IDLE"],  # "Simpan" → SAVED, "Batal" → IDLE
     "SAVED": ["IDLE"],
     "AWAIT_RECONCILE": ["IDLE"],
 }
