@@ -59,13 +59,13 @@ def _format_besar(n: int) -> str:
         return juta + " " + sisa
     if n < 1_000_000_000_000:
         miliar = _id_short(n // 1_000_000_000) + " Miliar"
-        sisa = _id_short(n % 1_000_000_000)
-        if sisa == "Nol":
+        sisa = _format_besar(n % 1_000_000_000)
+        if sisa == "":
             return miliar
         return miliar + " " + sisa
     triliun = _id_short(n // 1_000_000_000_000) + " Triliun"
-    sisa = _id_short(n % 1_000_000_000_000)
-    if sisa == "Nol":
+    sisa = _format_besar(n % 1_000_000_000_000)
+    if sisa == "":
         return triliun
     return triliun + " " + sisa
 

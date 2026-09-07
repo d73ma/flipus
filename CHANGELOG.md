@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] — 2026-09-07
+
+**FASE 5 Sprint 7 — wa_input State Machine Coverage + 2 Bug Fixes.**
+
+Lifts coverage 61.8% → 66.7% via 82 new tests for the WA input bot state machine.
+Fixes 2 real bugs surfaced by the new tests.
+
+### Fixed
+
+- **`AWAIT_NAMA` missing from `VALID_NEXT_STATES`** (`app/services/wa_input_state.py`).
+  State map claimed AWAIT_KH → CONFIRM, but `_wa_inbound_impl` actually asks for the
+  giver's name (AWAIT_NAMA) after KH. `set_state("AWAIT_NAMA")` raised
+  `ValueError("Invalid state")` — the full WA input flow was broken. Added AWAIT_NAMA
+  key and corrected the AWAIT_KH transition.
+- **`number_to_words` crash for >= 1 miliar** (`app/utils/number_to_words.py`).
+  miliar/triliun branches called `_id_short(n % X)` with remainder >= 1 juta, overflowing
+  `_chunk` → `IndexError` on `terbilang(1_250_000_000)`. Fixed to use recursive
+  `_format_besar()` for the remainder.
+
+### Added
+
+- `tests/test_s7_s7f_wa_input_replies.py` (26) — reply builders + `_send_fonnte_reply`
+- `tests/test_s7_s7f_wa_input_staging.py` (20) — staging list/delete/finalize
+- `tests/test_s7_s7f_wa_input_state_machine.py` (12) — full state machine flow
+- `tests/test_s7_s7f_wa_input_branches.py` (7) — multi-tenant, cocokkan, max-staging, POST wrapper
+- `tests/test_s7_s7f_retention_number_words.py` (15) — retention purge + terbilang
+
+### Changed
+
+- **Per-module coverage**: `wa_input.py` 23.7% → 86.3%; `retention_daemon.py` 0% → 93.3%;
+  `number_to_words.py` 67.2% → 95.3%.
+- **CI coverage gate**: 60.0% → **66.0%** (measured 66.7%).
+
+### Verified
+
+- ✅ `make ci` local: **745/745 tests pass, 66.7% coverage, 0 bandit, 0 pip-audit**.
+
+### Deferred (Sprint 8)
+
+- Coverage 66.7% < 67% (0.3pp gap): `pengeluaran_wa.py` (12.9%), `cloud_parser.py`
+  (13.9%), `batch_processor.py` (12.3%), `m8_managed.py` (28.7%), `quick_input.py` (35.1%).
+- mypy 76 errors (advisory).
+
+---
+
 ## [2.3.0] — 2026-09-06
 
 **FASE 5 Sprint 6 — PyJWT Migration + Pydantic v2 Cleanup + wa_input Coverage.**

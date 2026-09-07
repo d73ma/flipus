@@ -302,9 +302,15 @@ class TestValidNextStates:
         assert "AWAIT_KH" in VALID_NEXT_STATES["AWAIT_PT"]
         assert "IDLE" in VALID_NEXT_STATES["AWAIT_PT"]
 
-    def test_await_kh_to_confirm_or_idle(self):
-        assert "CONFIRM" in VALID_NEXT_STATES["AWAIT_KH"]
+    def test_await_kh_to_await_nama_or_idle(self):
+        """FASE 5 S7 — AWAIT_KH → AWAIT_NAMA (minta nama pemberi), bukan CONFIRM langsung."""
+        assert "AWAIT_NAMA" in VALID_NEXT_STATES["AWAIT_KH"]
         assert "IDLE" in VALID_NEXT_STATES["AWAIT_KH"]
+
+    def test_await_nama_to_confirm_or_idle(self):
+        """FASE 5 S7 — AWAIT_NAMA → CONFIRM setelah nama diberikan."""
+        assert "CONFIRM" in VALID_NEXT_STATES["AWAIT_NAMA"]
+        assert "IDLE" in VALID_NEXT_STATES["AWAIT_NAMA"]
 
     def test_confirm_to_saved_or_idle(self):
         assert "SAVED" in VALID_NEXT_STATES["CONFIRM"]
