@@ -45,7 +45,12 @@ env:
   #   pdf_gabungan 15.5% → 100%, laporan_gabungan 36.5% → 49.2%.
   # Sprint 6 target: 67% via integration tests for wa_input state machine +
   # pengeluaran_wa + master.py seed endpoint + QuickInput POST endpoint.
-  COVERAGE_MIN: "60.0"
+  # FASE 5 Sprint 7: wa_input.py state machine tested (42.7% → 86.3%),
+  # plus retention_daemon 0% → 93.3% + number_to_words 67% → 95.3%.
+  # Achieved 66.7% total. Gate set to 66.0% (buffer over measured 66.7%).
+  # Remaining toward 67%: pengeluaran_wa (12.9%), cloud_parser (13.9%),
+  # batch_processor (12.3%), m8_managed (28.7%), quick_input (35.1%).
+  COVERAGE_MIN: "66.0"
   # Same as `.env.example` — secrets are stubbed in CI, real values are
   # only injected via GitHub Actions secrets at deploy time.
   DATABASE_URL_LOCAL: "sqlite:///./flipus_ci.db"
