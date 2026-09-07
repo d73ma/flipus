@@ -44,17 +44,16 @@ class TestPersentaseConfig:
         )
         assert resp.status_code == 400
 
-    def test_get_auditor_other_misi_via_db(self, client, auditor_token) -> None:
+    def test_get_auditor_other_misi_via_db(self, client, auditor_token, test_db, uni_dk) -> None:
         """Auditor cannot view config for a misi they don't belong to.
 
         Create another misi in a DIFFERENT uni to ensure RBAC separation.
         """
         import uuid
 
-        from app.core.database import get_db
         from app.models.master import MisiKonferens, Uni
 
-        db = next(get_db())
+        db = test_db()
         # Use unique kode to avoid collision
         suffix = uuid.uuid4().hex[:6]
         other_uni = Uni(kode=f"U{suffix}", nama_resmi=f"Other Uni {suffix}")

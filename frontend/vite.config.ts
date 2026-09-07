@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Izinkan akses via cloudflared quick tunnel (*.trycloudflare.com)
+    // untuk demo/preview publik. Aman karena tunnel hanya expose dev server.
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       // Backend mount semua router di /api/v1/*
       // Frontend baseURL di api.ts adalah '/api' → full request path '/api/v1/...'
