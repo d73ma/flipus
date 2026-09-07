@@ -229,7 +229,11 @@ def quick_input(
         raise HTTPException(400, "Minimal 1 item dengan nominal > 0")
 
     # Tenant aktif
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True)  # noqa: E712.  .first()
+    tenant = (
+        db.query(Tenant)
+        .filter(Tenant.id == tenant_id, Tenant.is_active == True)  # noqa: E712
+        .first()
+    )
     if not tenant:
         raise HTTPException(404, f"Tenant {tenant_id} tidak aktif atau tidak ditemukan")
 

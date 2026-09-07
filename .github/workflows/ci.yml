@@ -48,9 +48,10 @@ env:
   # FASE 5 Sprint 7: wa_input.py state machine tested (42.7% → 86.3%),
   # plus retention_daemon 0% → 93.3% + number_to_words 67% → 95.3%.
   # Achieved 66.7% total. Gate set to 66.0% (buffer over measured 66.7%).
-  # Remaining toward 67%: pengeluaran_wa (12.9%), cloud_parser (13.9%),
-  # batch_processor (12.3%), m8_managed (28.7%), quick_input (35.1%).
-  COVERAGE_MIN: "66.0"
+  # FASE 5 Sprint 8: quick_input (91.9%), m8_managed (70.7%),
+  # cloud_parser (79.2%), batch_processor (93.0%) — crossed 67% target.
+  # Achieved 70.1% total. Gate set to 67.0% (target met with buffer).
+  COVERAGE_MIN: "67.0"
   # Same as `.env.example` — secrets are stubbed in CI, real values are
   # only injected via GitHub Actions secrets at deploy time.
   DATABASE_URL_LOCAL: "sqlite:///./flipus_ci.db"
