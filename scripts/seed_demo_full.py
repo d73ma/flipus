@@ -125,11 +125,13 @@ def tanggal_sabat_terakhir(n: int = 6) -> list:
     """
     Return N Sabtu terakhir sebagai list of date strings (YYYY-MM-DD).
 
-    Reference date: hari ini (2026-08-20). Sabtu terakhir sebelumnya.
+    Reference date: Sabtu terakhir sebelum hari ini (dinamis).
     """
+    today = datetime.now()
+    # Sabtu = weekday 5 (Senin=0). Hitung Sabtu terakhir.
+    days_since_saturday = (today.weekday() - 5) % 7
+    ref = today - timedelta(days=days_since_saturday)
     sabats = []
-    # 2026-08-15 adalah Sabtu terakhir (relative to 2026-08-20)
-    ref = datetime(2026, 8, 15)
     for i in range(n):
         sabat = ref - timedelta(weeks=i)
         sabats.append(sabat.strftime("%Y-%m-%d"))
@@ -137,12 +139,22 @@ def tanggal_sabat_terakhir(n: int = 6) -> list:
 
 
 def get_urutan_for_sabat(db, tenant_id: int, tanggal_sabat: str) -> int:
-    """Hitung urutan berikutnya (existing kuitansi + 1) untuk sabat tsb."""
+    """Hitung urutan berikutnya untuk bulan tsb (bukan per sabat).
+
+    Nomor kuitansi format '{urutan:03d}/{initial}/{bulan_romawi}/{tahun_2d}',
+    sehingga counter reset per BULAN, bukan per sabat. Kalau pakai per-sabat,
+    sabat ke-2 dst dalam bulan yang sama tabrakan nomor → di-skip.
+    """
+    tgl = datetime.fromisoformat(tanggal_sabat)
+    bulan_romawi_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI",
+                        7: "VII", 8: "VIII", 9: "IX", 10: "X", 11: "XI", 12: "XII"}
+    bulan_romawi = bulan_romawi_map[tgl.month]
+    tahun_2d = str(tgl.year)[-2:].zfill(2)
     existing_count = (
         db.query(Kuitansi)
         .filter(
             Kuitansi.tenant_id == tenant_id,
-            Kuitansi.tanggal_sabat == tanggal_sabat,
+            Kuitansi.nomor_kuitansi.like(f"%/{bulan_romawi}/{tahun_2d}"),
         )
         .count()
     )
