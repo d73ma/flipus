@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] — 2026-09-07
+
+**FASE 5 Sprint 8 — Coverage Finish (cross 67% target) + QuickInput Bug Fix.**
+
+FASE 5 complete. Coverage 66.7% → 70.1%, crossing the 67% gate. Fixes a critical
+bug that broke the v2.0 PWA Quick Input endpoint.
+
+### Fixed
+
+- **`quick_input.py` `.first()` comment-swallowed** (`app/api/v1/quick_input.py:232`).
+  `.first()` was inside a `# noqa` comment, so `tenant` stayed a `Query` object →
+  `AttributeError` on every `POST /kuitansi/quick-input`. Moved `.first()` out of the
+  comment. The M1 PWA Quick Input endpoint was silently broken until this fix.
+
+### Added
+
+- `tests/test_s8_s8f_quick_input.py` (14) — POST quick-input, kategori auto-create/reuse, validation, RBAC
+- `tests/test_s8_s8f_m8_managed.py` (22) — invite user, username/password gen, void kuitansi/pengeluaran
+- `tests/test_s8_s8f_ai_engine.py` (16) — `_is_suspicious_response`, Gemini mock, batch/ollama fallback
+
+### Changed
+
+- **Per-module coverage**: `quick_input.py` → 91.9%; `m8_managed.py` → 70.7%;
+  `cloud_parser.py` → 79.2%; `batch_processor.py` → 93.0%.
+- **CI coverage gate**: 66.0% → **67.0%** (measured 70.1%).
+
+### Verified
+
+- ✅ `make ci` local: **797/797 tests pass, 70.1% coverage, 0 bandit, 0 pip-audit**.
+
+### FASE 5 Complete
+
+FASE 5 (operational hardening) finishes across 5 sprints (S4–S8): CI pipeline,
+security gates (bandit 0 HIGH, pip-audit 0 vulns), coverage gate 47% → 67%,
+alembic baseline, PyJWT + Pydantic v2 migration, repo hygiene + GitHub release.
+3 critical bugs fixed (AWAIT_NAMA, number_to_words miliar, quick_input).
+
+### Deferred (FASE 6+)
+
+- mypy 76 errors (advisory).
+- `pengeluaran_wa.py` (12.9%), `scanner.py` (36.9%), `admin.py` (40.3%), `reports.py` (43%).
+
+---
+
 ## [2.4.0] — 2026-09-07
 
 **FASE 5 Sprint 7 — wa_input State Machine Coverage + 2 Bug Fixes.**
