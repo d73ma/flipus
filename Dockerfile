@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=backend-builder /install /usr/local
 
 # Backend app + storage
-COPY app ./app/
-COPY storage ./storage/
+COPY app /app/app
+COPY storage /app/storage
 RUN mkdir -p storage/temp storage/amplop_records storage/backups
 
 # Frontend static build → /app/frontend_dist (path yang diharapkan main.py)
