@@ -1,0 +1,41 @@
+# ===== Git =====
+.git
+.gitignore
+
+# ===== Python =====
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+.coverage
+
+# ===== Node / Frontend =====
+frontend/node_modules
+frontend/dist
+
+# ===== Database (jangan masuk image) =====
+*.db
+*.sqlite
+*.sqlite3
+flipus_local.db*
+
+# ===== Storage runtime (di-mount volume) =====
+storage/temp
+storage/amplop_records
+storage/backups
+storage/tenants/*/logo_*
+
+# ===== Env / secrets ====
+.env
+.env.*
+!.env.example
+
+# ===== Artifacts =====
+*.log
+.DS_Store
+.tmp_ruff
