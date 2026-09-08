@@ -159,7 +159,7 @@ export default function PengeluaranApproval({ role }: Props) {
     try {
       const statuses = activeTab === 'pending' ? pendingStatuses : historyStatuses;
       // Fetch all (limit 100), filter client-side
-      const resp = await api.get<Pengeluaran[]>('/pengeluaran/list?limit=100');
+      const resp = await api.get<Pengeluaran[]>('/v1/pengeluaran/list?limit=100');
       const filtered = resp.data.filter((p) => statuses.includes(p.status));
       setList(filtered);
     } catch (e: any) {
@@ -173,7 +173,7 @@ export default function PengeluaranApproval({ role }: Props) {
     setActioningId(id);
     setError(null);
     try {
-      const endpoint = role === 'KETUA_KEUANGAN' ? `/pengeluaran/${id}/approve-ketua` : `/pengeluaran/${id}/approve-pendeta`;
+      const endpoint = role === 'KETUA_KEUANGAN' ? `/v1/pengeluaran/${id}/approve-ketua` : `/v1/pengeluaran/${id}/approve-pendeta`;
       await api.post(endpoint, { note: noteText.trim() || null });
       setSuccessMsg(`Pengeluaran ${role === 'KETUA_KEUANGAN' ? 'disetujui sebagai Ketua (lanjut ke Pendeta)' : 'final approved ✓'}`);
       setTimeout(() => setSuccessMsg(null), 4000);
@@ -195,7 +195,7 @@ export default function PengeluaranApproval({ role }: Props) {
     setActioningId(id);
     setError(null);
     try {
-      await api.post(`/pengeluaran/${id}/reject`, { reason: rejectReason.trim() });
+      await api.post(`/v1/pengeluaran/${id}/reject`, { reason: rejectReason.trim() });
       setSuccessMsg('Pengeluaran ditolak');
       setTimeout(() => setSuccessMsg(null), 3000);
       setRejectForId(null);

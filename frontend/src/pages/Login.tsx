@@ -351,7 +351,7 @@ const Login = () => {
             </Link>
             <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>
               Belum punya akun?{' '}
-              <Link to="/register" style={{ color: '#1B4332', textDecoration: 'none', fontWeight: 600 }}>
+              <Link to="/register/pendeta" style={{ color: '#1B4332', textDecoration: 'none', fontWeight: 600 }}>
                 Daftar di sini
               </Link>
             </p>

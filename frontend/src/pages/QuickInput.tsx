@@ -153,7 +153,10 @@ const totalBadgeStyle: React.CSSProperties = {
 
 const formatRupiah = (digits: string): string => {
   if (!digits) return '';
-  return new Intl.NumberFormat('id-ID').format(parseInt(digits, 10));
+  // Strip non-digit dulu — jangan parseInt langsung, karena titik (.) separator
+  // ribuan akan membuat parseInt berhenti dan nominal runtuh jadi puluhan.
+  const num = parseInt(digits.replace(/\D/g, ''), 10) || 0;
+  return num === 0 ? '' : new Intl.NumberFormat('id-ID').format(num);
 };
 
 const parseRupiah = (formatted: string): number => {
@@ -179,7 +182,7 @@ const QuickInput = () => {
     let cancelled = false;
     (async () => {
       try {
-        const resp = await api.get<KategoriOption[]>('/kategori/list');
+        const resp = await api.get<KategoriOption[]>('/v1/kategori/list');
         if (!cancelled) setKategoriOptions(resp.data);
       } catch (err: any) {
         // Silent fail — user bisa tetap ketik manual
@@ -237,7 +240,7 @@ const QuickInput = () => {
 
     setSubmitting(true);
     try {
-      const resp = await api.post<QuickInputResponse>('/kuitansi/quick-input', {
+      const resp = await api.post<QuickInputResponse>('/v1/kuitansi/quick-input', {
         nama_pemberi: namaPemberi.trim(),
         items: validRows.map((r) => ({
           kategori_nama: r.kategoriNama.trim(),
@@ -250,7 +253,7 @@ const QuickInput = () => {
       setRows([{ id: newRowId(), kategoriNama: '', nominal: '' }]);
       // Reload kategori list (mungkin ada yang baru di-create)
       try {
-        const refresh = await api.get<KategoriOption[]>('/kategori/list');
+        const refresh = await api.get<KategoriOption[]>('/v1/kategori/list');
         setKategoriOptions(refresh.data);
       } catch (e) { /* silent */ }
     } catch (err: any) {
@@ -404,7 +407,7 @@ const QuickInput = () => {
                   type="text"
                   inputMode="numeric"
                   value={formatRupiah(row.nominal)}
-                  onChange={(e) => updateRow(row.id, { nominal: e.target.value })}
+                  onChange={(e) => updateRow(row.id, { nominal: e.target.value.replace(/\D/g, '') })}
                   placeholder="0"
                   style={{ ...inputStyle, fontSize: 16, fontWeight: 600, textAlign: 'right' }}
                 />

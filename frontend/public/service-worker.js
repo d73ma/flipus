@@ -8,7 +8,7 @@
  * user akan dapat fallback page sederhana (lihat OFFLINE_FALLBACK_HTML).
  */
 
-const CACHE_NAME = "flipus-v20-m1";
+const CACHE_NAME = "flipus-v20-m2";
 const STATIC_CACHE = `${CACHE_NAME}-static`;
 const RUNTIME_CACHE = `${CACHE_NAME}-runtime`;
 

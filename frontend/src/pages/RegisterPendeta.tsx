@@ -289,23 +289,25 @@ const RegisterPendeta = () => {
             </div>
           </fieldset>
 
-          {/* Bendahara (opsional) */}
+          {/* Bendahara */}
           <fieldset className="border-t border-gray-200 pt-6">
-            <legend className="text-lg font-display text-sabbath-dark mb-4">Data Bendahara (opsional)</legend>
+            <legend className="text-lg font-display text-sabbath-dark mb-4">Data Bendahara</legend>
             <div className="grid md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Bendahara</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Bendahara *</label>
                 <input
                   type="text"
+                  required
                   value={namaBendahara}
                   onChange={(e) => setNamaBendahara(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nomor WA Bendahara</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nomor WA Bendahara *</label>
                 <input
                   type="tel"
+                  required
                   value={waBendahara}
                   onChange={(e) => setWaBendahara(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold"

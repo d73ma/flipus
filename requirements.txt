@@ -9,7 +9,9 @@ pydantic-settings==2.15.0
 # FLIPUS pakai HS256 only — PyJWT support penuh via cryptography.
 pyjwt[crypto]==2.13.0
 passlib[bcrypt]==1.7.4
-bcrypt>=4.0,<5.0
+# FASE 5 Sprint 8 — pin bcrypt==4.0.1: passlib 1.7.4 incompatible dgn bcrypt 4.1+,
+# yang menghapus bcrypt.__about__.__version__ (warning trapped saat login).
+bcrypt==4.0.1
 
 # FASE 5 Sprint 4 — upgrade deps untuk menutup pip-audit vulns.
 # cryptography 50.0.1 menutup 6 advisories (44.0.3 rentan).

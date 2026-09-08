@@ -11,9 +11,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 // ===== Register Service Worker (PWA) =====
 // v2.0 M1: daftar SW untuk enable install-to-homescreen + cache basic.
-// register() aman di localhost (SW akan handle, tidak crash dev mode).
-// Wrapped dalam if ('serviceWorker' in navigator) — Safari lama & iOS tanpa HTTPS bisa skip.
-if ('serviceWorker' in navigator) {
+// FASE 5 — HANYA di production build. Di dev (Vite), SW cache-first bikin
+// browser menyajikan JS lama (stale) dan HMR tidak terlihat — ini yang
+// menyebabkan bug "input reset" + "404 /api/kategori/list" karena Jerry
+// masih melihat bundle lama via tunnel. Matikan SW saat dev.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/service-worker.js')

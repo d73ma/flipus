@@ -200,7 +200,7 @@ export default function PengeluaranInput() {
 
   async function loadKategori() {
     try {
-      const resp = await api.get<KategoriOption[]>('/kategori-pengeluaran/list');
+      const resp = await api.get<KategoriOption[]>('/v1/kategori-pengeluaran/list');
       setKategoriList(resp.data);
     } catch (e: any) {
       console.error('loadKategori failed', e);
@@ -210,7 +210,7 @@ export default function PengeluaranInput() {
   async function loadPengeluaran() {
     setLoading(true);
     try {
-      const resp = await api.get<Pengeluaran[]>(`/pengeluaran/list?bulan=${filterBulan}&limit=100`);
+      const resp = await api.get<Pengeluaran[]>(`/v1/pengeluaran/list?bulan=${filterBulan}&limit=100`);
       setPengeluaranList(resp.data);
     } catch (e: any) {
       setError(e.message || 'Gagal load pengeluaran');
@@ -227,7 +227,7 @@ export default function PengeluaranInput() {
     setAddingKategori(true);
     setError(null);
     try {
-      const resp = await api.post<KategoriOption>('/kategori-pengeluaran/create', {
+      const resp = await api.post<KategoriOption>('/v1/kategori-pengeluaran/create', {
         nama: newKatNama.trim(),
         alias: newKatAlias.trim().toUpperCase(),
         is_rutin: newKatRutin,
@@ -268,9 +268,9 @@ export default function PengeluaranInput() {
         metode_bayar: metodeBayar,
       };
       if (editingId) {
-        await api.put(`/pengeluaran/${editingId}/update`, payload);
+        await api.put(`/v1/pengeluaran/${editingId}/update`, payload);
       } else {
-        await api.post('/pengeluaran/create', payload);
+        await api.post('/v1/pengeluaran/create', payload);
       }
       // Reset form
       setKategoriId('');
@@ -292,7 +292,7 @@ export default function PengeluaranInput() {
   async function handleSubmitForApproval(id: number) {
     setError(null);
     try {
-      const resp = await api.post<Pengeluaran>(`/pengeluaran/${id}/submit`, {});
+      const resp = await api.post<Pengeluaran>(`/v1/pengeluaran/${id}/submit`, {});
       const updated = resp.data;
       if (updated.status === 'approved') {
         setSuccessMsg('Pengeluaran RUTIN: auto-approved! ✓');
