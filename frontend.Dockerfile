@@ -1,14 +1,12 @@
-"""
-FLIPUS v1.2 — Frontend Dockerfile.
-
-Multi-stage build:
-- Stage 1 (builder): install Node deps + build Vite production bundle
-- Stage 2 (runtime): nginx serve static files dari /usr/share/nginx/html
-
-Usage:
-    docker build -f frontend.Dockerfile -t flipus-frontend ./frontend
-    docker run -p 80:80 flipus-frontend
-"""
+# FLIPUS v1.2 — Frontend Dockerfile.
+#
+# Multi-stage build:
+# - Stage 1 (builder): install Node deps + build Vite production bundle
+# - Stage 2 (runtime): nginx serve static files dari /usr/share/nginx/html
+#
+# Usage:
+#     docker build -f frontend.Dockerfile -t flipus-frontend ./frontend
+#     docker run -p 80:80 flipus-frontend
 
 # ---------- Builder stage ----------
 FROM node:18-alpine AS builder

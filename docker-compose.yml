@@ -1,16 +1,14 @@
-"""
-FLIPUS v1.2 — Docker Compose untuk deployment production-grade.
-
-Services:
-- postgres: Database (optional, default SQLite di volume)
-- backend: FastAPI + uvicorn (4 workers)
-- frontend: Vite SPA via nginx (reverse proxy untuk /api)
-
-Usage:
-    cp .env.example .env  # lalu edit values
-    docker compose up -d
-    # Cek: http://localhost (frontend) atau http://localhost/api (backend)
-"""
+# FLIPUS v1.2 — Docker Compose untuk deployment production-grade.
+#
+# Services:
+# - postgres: Database (optional, default SQLite di volume)
+# - backend: FastAPI + uvicorn (4 workers)
+# - frontend: Vite SPA via nginx (reverse proxy untuk /api)
+#
+# Usage:
+#     cp .env.example .env  # lalu edit values
+#     docker compose up -d
+#     # Cek: http://localhost (frontend) atau http://localhost/api (backend)
 
 version: "3.9"
 

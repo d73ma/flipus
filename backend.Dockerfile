@@ -1,14 +1,12 @@
-"""
-FLIPUS v1.2 — Backend Dockerfile.
-
-Multi-stage build untuk produksi:
-- Stage 1 (builder): install dependencies + compile
-- Stage 2 (runtime): copy only what's needed, run uvicorn
-
-Usage:
-    docker build -f backend.Dockerfile -t flipus-backend .
-    docker run -p 8000:8000 flipus-backend
-"""
+# FLIPUS v1.2 — Backend Dockerfile.
+#
+# Multi-stage build untuk produksi:
+# - Stage 1 (builder): install dependencies + compile
+# - Stage 2 (runtime): copy only what's needed, run uvicorn
+#
+# Usage:
+#     docker build -f backend.Dockerfile -t flipus-backend .
+#     docker run -p 8000:8000 flipus-backend
 
 # ---------- Builder stage ----------
 FROM python:3.11-slim AS builder
