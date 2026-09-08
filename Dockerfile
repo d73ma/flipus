@@ -1,12 +1,9 @@
 # FLIPUS v2 — Single-container Dockerfile (Railway/PAAS deployment).
 #
 # Menggabungkan frontend (Vite build) + backend (FastAPI/uvicorn) dalam SATU
-# container, dijalankan bersama via supervisord:
-#   - nginx: serve frontend static + reverse-proxy /api ke uvicorn
-#   - uvicorn: FastAPI backend di 127.0.0.1:8000
-#
-# Berlawanan dgn docker-compose.yml (2 service terpisah), ini 1 container
-# supaya Railway/Render bisa deploy langsung dari repo ini.
+# container. Frontend di-serve LANGSUNG oleh FastAPI (lihat app/main.py),
+# sehingga TIDAK butuh nginx/supervisord — satu proses uvicorn saja:
+#   uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
 # ============ Stage 1: Build frontend ============
 FROM node:18-alpine AS frontend-builder
@@ -25,37 +22,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# ============ Stage 3: Runtime (combined) ============
+# ============ Stage 3: Runtime ============
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Runtime system deps: nginx (frontend+proxy), supervisor (process mgmt),
-# curl (healthcheck), libpq5 (kalau pakai PostgreSQL).
+# curl untuk healthcheck; libpq5 kalau pakai PostgreSQL
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        nginx supervisor curl libpq5 \
+        curl libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python packages dari builder
 COPY --from=backend-builder /install /usr/local
 
-# Backend app
+# Backend app + storage
 COPY app/ ./app/
 COPY storage/ ./storage/
 RUN mkdir -p storage/temp storage/amplop_records storage/backups
 
-# Frontend static build + nginx config
-COPY --from=frontend-builder /build/dist /usr/share/nginx/html
-COPY nginx.railway.conf /etc/nginx/conf.d/default.conf
-RUN rm -f /etc/nginx/sites-enabled/default
-
-# Supervisor config — ke MAIN config (bukan conf.d), supaya [supervisord]
-# nodaemon=true aktif dan supervisord tetap foreground (PID 1).
-COPY supervisord.conf /etc/supervisor/supervisord.conf
-
-# Entrypoint (PORT substitution)
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Frontend static build → /app/frontend_dist (path yang diharapkan main.py)
+COPY --from=frontend-builder /build/dist /app/frontend_dist
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -63,4 +49,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Uvicorn bind 0.0.0.0:$PORT (Railway inject PORT). Frontend SPA di-serve
+# oleh FastAPI (StaticFiles mount + catch-all), bukan nginx.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]

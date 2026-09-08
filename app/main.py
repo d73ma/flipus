@@ -1,8 +1,8 @@
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
@@ -234,8 +234,25 @@ try:
 except Exception as _create_exc:
     _startup_log.error("create_all_failed exc=%s msg=%s", type(_create_exc).__name__, _create_exc)
 
+# === Path frontend dist (untuk Railway/production: serve SPA langsung) ===
+# Kalau frontend_dist/index.html ada (di-copy oleh Dockerfile), route "/"
+# dan semua route React Router tersaji oleh backend. Kalau tidak ada
+# (local dev, frontend via Vite :5173), root() fallback ke JSON status.
+_FRONTEND_DIST = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend_dist")
+)
+
+
+def _frontend_index_html() -> str | None:
+    _idx = os.path.join(_FRONTEND_DIST, "index.html")
+    return _idx if os.path.isfile(_idx) else None
+
+
 @app.get("/")
 def root():
+    _index = _frontend_index_html()
+    if _index:
+        return FileResponse(_index)
     return {
         "status": "FLIPUS Active",
         "version": "1.2.0",
@@ -285,3 +302,34 @@ except Exception as _metrics_exc:
         "metrics_endpoint_failed exc=%s msg=%s",
         type(_metrics_exc).__name__, _metrics_exc,
     )
+
+
+# === Serve frontend SPA (Railway/production) ===
+# Mount static assets (hashed JS/CSS di /assets + public files di /icons),
+# lalu catch-all route untuk semua path SPA (React Router) → index.html.
+# Ini menghilangkan kebutuhan nginx reverse-proxy di single-container.
+if _frontend_index_html() is not None:
+    _assets_dir = os.path.join(_FRONTEND_DIST, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="frontend_assets")
+
+    _icons_dir = os.path.join(_FRONTEND_DIST, "icons")
+    if os.path.isdir(_icons_dir):
+        app.mount("/icons", StaticFiles(directory=_icons_dir), name="frontend_icons")
+
+    # File static individu (favicon, manifest, dsb.)
+    for _fname in ("favicon.svg", "manifest.json", "service-worker.js", "icons.svg", "gmahk-logo.png"):
+        _fpath = os.path.join(_FRONTEND_DIST, _fname)
+        if os.path.isfile(_fpath):
+            @app.get(f"/{_fname}", include_in_schema=False)
+            def _static_file(fpath: str = _fpath):
+                return FileResponse(fpath)
+
+    # SPA fallback: path non-API → index.html (React Router handle routing)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def _spa_fallback(full_path: str):
+        if full_path.startswith(("api/", "storage/", "docs", "redoc", "openapi.json", "metrics", "health")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(_frontend_index_html())
+
+    _startup_log.info("frontend_spa_mounted dist=%s", _FRONTEND_DIST)
