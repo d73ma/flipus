@@ -49,8 +49,9 @@ COPY --from=frontend-builder /build/dist /usr/share/nginx/html
 COPY nginx.railway.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 
-# Supervisor config
-COPY supervisord.conf /etc/supervisor/conf.d/flipus.conf
+# Supervisor config — ke MAIN config (bukan conf.d), supaya [supervisord]
+# nodaemon=true aktif dan supervisord tetap foreground (PID 1).
+COPY supervisord.conf /etc/supervisor/supervisord.conf
 
 # Entrypoint (PORT substitution)
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

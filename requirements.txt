@@ -20,11 +20,9 @@ cryptography==50.0.1
 Pillow==12.3.0
 # python-multipart 0.0.32 menutup 7 advisories (0.0.12 rentan, multipart-parser DoS).
 python-multipart==0.0.32
-# Starlette 0.52.1 menutup 1 advisory (PYSEC-2026-1942). 5 advisories lain
-# butuh starlette 1.0+ yang belum kompatibel dengan prometheus-fastapi-instrumentator.
-# Di-suppress via `pip-audit --ignore-vuln` di Makefile + ci.yml — lihat rationale
-# di FASE5_SPRINT4_SUMMARY.md §A2.
-starlette>=0.52.1,<1.0  # transitif via fastapi>=0.123.0
+# Starlette — dijaga sinkron dgn venv (1.6.0). Transitive via fastapi 0.141.1.
+# FASE 5 S4 cascade: fastapi 0.141.1 butuh starlette 1.x.
+starlette==1.6.0
 # ecdsa: REMOVED FASE 5 Sprint 6 — transitif via python-jose yang sudah di-uninstall.
 # ecdsa 0.19.2 punya PYSEC-2026-1325 (no-fix Minerva timing attack).
 # Mitigasi: migrate python-jose → PyJWT (security.py). HS256 JWT tidak pernah
@@ -51,7 +49,9 @@ ruff==0.7.4
 
 # FASE 5 Sprint 2 — Prometheus metrics
 prometheus_client==0.21.1
-prometheus-fastapi-instrumentator==7.0.0
+# FASE 5 S4 cascade — 8.1.0 dibutuhkan agar kompatibel dgn starlette 1.x
+# (7.0.0 gagal dengan fastapi 0.141.1 + starlette 1.6.0).
+prometheus-fastapi-instrumentator==8.1.0
 
 # FASE 5 Sprint 3 — Security tooling (used in CI)
 # bandit: AST-based security linter for common Python vulns (eval,
