@@ -427,47 +427,51 @@ def update_persentase_config(
         f"x_u={cfg.pct_x_uni},pt_u={cfg.pct_pt_uni},kh_u={cfg.pct_khusus_uni}"
     )
 
-    # T81 (revisi 2026-08-23): Validasi range Jerry Model B — pct_uni adalah
-    # fraction of (1 - pct_jemaat), bukan of total. Constraint pct_jemaat +
-    # pct_uni ≤ 1.0 sudah TIDAK berlaku lagi (Model A strict). Hanya cek range 0..1.
-    from app.utils.porsi_calculator import validate_porsi_constraint
-    errs = validate_porsi_constraint(
-        pct_x_jemaat=payload.pct_x_jemaat, pct_x_uni=payload.pct_x_uni,
-        pct_pt_jemaat=payload.pct_pt_jemaat, pct_pt_uni=payload.pct_pt_uni,
-        pct_khusus_jemaat=payload.pct_khusus_jemaat, pct_khusus_uni=payload.pct_khusus_uni,
-    )
+    # === Validasi Jerry (2026-09-09) — model "Uni + Misi ≤ 100, Jemaat = sisa" ===
+    # Prioritas: (1) Admin Uni set pct_uni; (2) Auditor set pct_misi;
+    # (3) Jemaat DERIVED = 100 - uni - misi. Tidak ada input pct_jemaat.
+    # Storage: MISI row `pct_x_jemaat` menyimpan nilai DERIVED jemaat —
+    # frontend auditor menghitungnya = (100 - slider_misi - uni)/100.
+    errs: list[str] = []
+    eps = 1e-9
 
-    # T105 (2026-08-26): Cross-scope validation — Jerry Model B butuh total
-    # pct_jemaat + pct_uni ≤ 1.0. pct_uni bisa di UNI scope (Admin Uni set).
-    # Save MISI scope saja tidak bisa valid kalau pct_jemaat + UNI pct_uni > 1.0.
-    if payload.scope == "MISI" and current["role"] == "AUDITOR_MISI":
-        misi_row = db.query(MisiKonferens).filter(MisiKonferens.id == payload.ref_id).first()
-        if misi_row:
-            uni_cfg = (
-                db.query(PersentaseConfig)
-                .filter(PersentaseConfig.scope == "UNI", PersentaseConfig.ref_id == misi_row.uni_id)
-                .first()
-            )
-            uni_x = float(uni_cfg.pct_x_uni or 0) if uni_cfg else 0
-            uni_pt = float(uni_cfg.pct_pt_uni or 0) if uni_cfg else 0
-            uni_kh = float(uni_cfg.pct_khusus_uni or 0) if uni_cfg else 0
-            tiers = [
-                ("X",      payload.pct_x_jemaat,      uni_x),
-                ("PT",     payload.pct_pt_jemaat,     uni_pt),
-                ("Khusus", payload.pct_khusus_jemaat, uni_kh),
-            ]
-            for tier_name, pj, pu in tiers:
-                if pj + pu > 1.0 + 1e-9:
-                    errs.append(
-                        f"{tier_name}: Anda set {(1-pj)*100:.0f}% ke Misi, "
-                        f"Admin Uni set {pu*100:.0f}% ke Uni. "
-                        f"Total {pj*100+pu*100:.0f}% > 100%. "
-                        f"Kurangi slider Misi atau minta Admin Uni kurangi slider Uni."
-                    )
+    def _resolve_uni_cfg_for_misi(db: Session, misi_id: int):
+        misi_row = db.query(MisiKonferens).filter(MisiKonferens.id == misi_id).first()
+        if not misi_row:
+            return None
+        return (
+            db.query(PersentaseConfig)
+            .filter(PersentaseConfig.scope == "UNI", PersentaseConfig.ref_id == misi_row.uni_id)
+            .first()
+        )
 
-    # T105 (2026-08-26): Cross-scope dari sisi Admin Uni — kalau Admin Uni save
-    # pct_uni, cross-check dengan pct_jemaat di semua MISI scopes dalam uni ini.
-    if payload.scope == "UNI" and current["role"] == "ADMIN_UNI":
+    if payload.scope == "MISI":
+        # Auditor menetapkan porsi Misi -> kirim pct_*_jemaat DERIVED.
+        uni_cfg = _resolve_uni_cfg_for_misi(db, payload.ref_id)
+        uni_x = float(uni_cfg.pct_x_uni or 0.0) if uni_cfg else 0.0
+        uni_pt = float(uni_cfg.pct_pt_uni or 0.0) if uni_cfg else 0.0
+        uni_kh = float(uni_cfg.pct_khusus_uni or 0.0) if uni_cfg else 0.0
+        tiers = [
+            ("X", payload.pct_x_jemaat, uni_x),
+            ("PT", payload.pct_pt_jemaat, uni_pt),
+            ("Khusus", payload.pct_khusus_jemaat, uni_kh),
+        ]
+        for tier_name, pj, pu in tiers:
+            misi_share = 1.0 - pj - pu
+            if misi_share < -eps:
+                errs.append(
+                    f"{tier_name}: Total melebihi 100%. Porsi Uni {pu*100:.0f}% + "
+                    f"Porsi Misi {misi_share*100:.0f}% = {(pu+misi_share)*100:.0f}% >100%. "
+                    f"Kurangi salah satu."
+                )
+            elif pj < -eps:
+                errs.append(
+                    f"{tier_name}: Porsi Jemaat tidak boleh negatif. Uni {pu*100:.0f}% + "
+                    f"Misi {misi_share*100:.0f}% sudah 100% — Jemaat 0%."
+                )
+
+    if payload.scope == "UNI":
+        # Admin menetapkan porsi Uni — cross-check dengan MISI rows.
         misi_rows = db.query(MisiKonferens).filter(MisiKonferens.uni_id == payload.ref_id).all()
         for misi_row in misi_rows:
             misi_cfg = (
@@ -477,21 +481,21 @@ def update_persentase_config(
             )
             if not misi_cfg:
                 continue
-            pj_x = float(misi_cfg.pct_x_jemaat or 0)
-            pj_pt = float(misi_cfg.pct_pt_jemaat or 0)
-            pj_kh = float(misi_cfg.pct_khusus_jemaat or 0)
             tiers = [
-                ("X",      pj_x, payload.pct_x_uni),
-                ("PT",     pj_pt, payload.pct_pt_uni),
-                ("Khusus", pj_kh, payload.pct_khusus_uni),
+                ("X", float(misi_cfg.pct_x_jemaat or 0.0), payload.pct_x_uni),
+                ("PT", float(misi_cfg.pct_pt_jemaat or 0.0), payload.pct_pt_uni),
+                ("Khusus", float(misi_cfg.pct_khusus_jemaat or 0.0), payload.pct_khusus_uni),
             ]
-            for tier_name, pj, pu in tiers:
-                if pj + pu > 1.0 + 1e-9:
+            for tier_name, pj, pu_new in tiers:
+                misi_share = 1.0 - pj - (float(cfg.pct_x_uni or 0.0) if tier_name == "X"
+                                        else float(cfg.pct_pt_uni or 0.0) if tier_name == "PT"
+                                        else float(cfg.pct_khusus_uni or 0.0))
+                total_uni_misi = pu_new + misi_share
+                if total_uni_misi > 1.0 + eps:
                     errs.append(
-                        f"{tier_name}: Misi {misi_row.kode} set {(1-pj)*100:.0f}% ke Misi, "
-                        f"Anda set {pu*100:.0f}% ke Uni. "
-                        f"Total {pj*100+pu*100:.0f}% > 100%. "
-                        f"Kurangi slider Uni atau minta Auditor Misi kurangi slider Misi."
+                        f"{tier_name}: Total melebihi 100%. Porsi Uni {pu_new*100:.0f}% + "
+                        f"Porsi Misi {misi_share*100:.0f}% (misi {misi_row.kode}) = "
+                        f"{total_uni_misi*100:.0f}% >100%. Kurangi salah satu."
                     )
 
     if errs:
@@ -507,6 +511,37 @@ def update_persentase_config(
     cfg.pct_x_uni = payload.pct_x_uni
     cfg.pct_pt_uni = payload.pct_pt_uni
     cfg.pct_khusus_uni = payload.pct_khusus_uni
+
+    # === Propagasi derived (Jerry 2026-09-09) ===
+    # Jemaat TIDAK di-input — selalu sisa. Saat Admin Uni ubah pct_uni,
+    # update pct_*_jemaat di SEMUA MISI rows dalam uni ini:
+    #   jemaat_baru = jemaat_lama + old_uni - new_uni
+    # (karena misi share tetap; hanya uni yang bergeser makan bagian jemaat).
+    if payload.scope == "UNI":
+        misi_rows = db.query(MisiKonferens).filter(MisiKonferens.uni_id == payload.ref_id).all()
+        old_uni_map = {
+            "X": float(cfg.pct_x_uni or 0.0),
+            "PT": float(cfg.pct_pt_uni or 0.0),
+            "KH": float(cfg.pct_khusus_uni or 0.0),
+        }
+        new_uni_map = {
+            "X": payload.pct_x_uni,
+            "PT": payload.pct_pt_uni,
+            "KH": payload.pct_khusus_uni,
+        }
+        for misi_row in misi_rows:
+            misi_cfg = (
+                db.query(PersentaseConfig)
+                .filter(PersentaseConfig.scope == "MISI", PersentaseConfig.ref_id == misi_row.id)
+                .first()
+            )
+            if not misi_cfg:
+                continue
+            for tier, attr in (("X", "pct_x_jemaat"), ("PT", "pct_pt_jemaat"), ("KH", "pct_khusus_jemaat")):
+                cur = float(getattr(misi_cfg, attr) or 0.0)
+                derived = cur + old_uni_map[tier] - new_uni_map[tier]
+                setattr(misi_cfg, attr, max(0.0, min(1.0, derived)))
+            db.add(misi_cfg)
 
     after = (
         f"x={cfg.pct_x_jemaat},pt={cfg.pct_pt_jemaat},kh={cfg.pct_khusus_jemaat}|"

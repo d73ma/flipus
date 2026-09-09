@@ -107,6 +107,7 @@ interface TenantProfile {
   nama_uni: string;
   nama_kantor_misi: string;
   misi_konferens_id?: number;
+  uni_id?: number;
 }
 
 interface PersentaseConfig {
@@ -162,6 +163,8 @@ const BendaharaDashboard = () => {
 
   // T39: read-only MISI percentage (set by Auditor Misi)
   const [pctMisi, setPctMisi] = useState<PersentaseConfig | null>(null);
+  // T39: read-only UNI percentage (set by Admin Uni) — buat tampilan "Ke Misi X% dan Ke Uni Y%"
+  const [pctUni, setPctUni] = useState<PersentaseConfig | null>(null);
 
   // T94 Section 8: WA staging items (dari Bendahara chat via WhatsApp)
   const [stagingItems, setStagingItems] = useState<WaStagingItem[]>([]);
@@ -217,6 +220,31 @@ const BendaharaDashboard = () => {
     }
   };
 
+  // T39: fetch UNI persentase (read-only) yang ditetapkan Admin Uni.
+  const fetchPersentaseUni = async () => {
+    if (!tenantProfile?.uni_id && !tenantProfile?.nama_uni) return;
+    try {
+      const r = await api.get<PersentaseConfig>('/v1/master/persentase', {
+        params: { scope: 'UNI', ref_id: tenantProfile.uni_id },
+      });
+      setPctUni(r.data);
+    } catch (e) {
+      try {
+        // fallback: cari via nama_uni → id (kalau uni_id tidak dikirim profile)
+        const unis = await api.get<any[]>('/v1/master/uni');
+        const uni = unis.data.find((u) => u.nama_resmi === tenantProfile.nama_uni);
+        if (uni) {
+          const r2 = await api.get<PersentaseConfig>('/v1/master/persentase', {
+            params: { scope: 'UNI', ref_id: uni.id },
+          });
+          setPctUni(r2.data);
+        }
+      } catch (e2) {
+        setPctUni(null);
+      }
+    }
+  };
+
   useEffect(() => {
     fetchSabatInfo();
     fetchTenantProfile();
@@ -225,7 +253,10 @@ const BendaharaDashboard = () => {
 
   // T39: setelah tenantProfile ada (ada misi_konferens_id), fetch persentase MISI
   useEffect(() => {
-    if (tenantProfile?.misi_konferens_id) fetchPersentaseMisi();
+    if (tenantProfile?.misi_konferens_id) {
+      fetchPersentaseMisi();
+      fetchPersentaseUni();
+    }
   }, [tenantProfile?.misi_konferens_id]);
 
   // T94 Section 8: fetch WA staging items on mount
@@ -442,29 +473,43 @@ const BendaharaDashboard = () => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
               <p style={{ fontSize: 10, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
-                Perpuluhan ke Misi
+                Perpuluhan
               </p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: '#B8860B', margin: 0 }}>
-                {/* pct_x_jemaat = Jemaat retention → 0% ret = 100% ke Misi (inverse) */}
-                {Math.round((1 - pctMisi.pct_x_jemaat) * 100)}%
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
+                {/* misi = 1 - jemaat(derived) - uni */}
+                {Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100))}%
+              </p>
+              <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
+                KE MISI {Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100))}% ·{' '}
+                Ke Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                {Math.max(0, Math.round((pctMisi.pct_x_jemaat) * 100))}%
               </p>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
               <p style={{ fontSize: 10, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
-                Persembahan ke Misi
+                Persembahan
               </p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: '#B8860B', margin: 0 }}>
-                {/* pct_pt_jemaat = Jemaat retention → inverse untuk display */}
-                {Math.round((1 - pctMisi.pct_pt_jemaat) * 100)}%
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
+                {Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100))}%
+              </p>
+              <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
+                KE MISI {Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100))}% ·{' '}
+                Ke Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                {Math.max(0, Math.round((pctMisi.pct_pt_jemaat) * 100))}%
               </p>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
               <p style={{ fontSize: 10, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
                 Persembahan Khusus
               </p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: '#B8860B', margin: 0 }}>
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
                 {/* pct_khusus_jemaat = fraction to MISI (semantic inverse dari x/pt) — display langsung */}
                 {Math.round(pctMisi.pct_khusus_jemaat * 100)}%
+              </p>
+              <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
+                KE MISI {Math.round(pctMisi.pct_khusus_jemaat * 100)}% · Ke Uni{' '}
+                {Math.round((pctUni?.pct_khusus_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                {Math.max(0, 100 - Math.round(pctMisi.pct_khusus_jemaat * 100) - Math.round((pctUni?.pct_khusus_uni ?? 0) * 100))}%
               </p>
             </div>
           </div>

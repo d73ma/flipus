@@ -163,11 +163,12 @@ const AuditorDashboard = () => {
       const r = await api.get<PersentaseConfig>('/v1/master/persentase', {
         params: { scope: 'MISI', ref_id: misiInfo.id },
       });
-      // Slider pctX/PT = "fraction Jemaat→Misi" (ke Misi), display = (1 - pct_jemaat)*100.
-      // Save: pct_x_jemaat = (100 - slider) / 100. KH fixed to 0% locked.
+      // ===== Model "Uni + Misi ≤ 100, Jemaat = sisa" (Jerry 2026-09-09) =====
+      // Slider = PORSI MISI LANGSUNG. pct_x_jemaat (MISI row) menyimpan
+      // DERIVED jemaat = 100 - misi - uni. Display: misi = 1 - jemaat - uni.
       setPct(r.data);
-      setPctX(Math.round((1 - r.data.pct_x_jemaat) * 100));
-      setPctPT(Math.round((1 - r.data.pct_pt_jemaat) * 100));
+      setPctX(Math.max(0, Math.round((1 - r.data.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100)));
+      setPctPT(Math.max(0, Math.round((1 - r.data.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100)));
     } catch (e) {}
   };
 
@@ -185,21 +186,30 @@ const AuditorDashboard = () => {
     if (misiInfo?.uni_id) fetchPersentaseUni();
   }, [misiInfo?.uni_id]);
 
+  // Setelah pctUni siap, re-load pct MISI (karena display misi = 1 - jemaat - uni)
+  useEffect(() => {
+    if (misiInfo?.id && pctUni) fetchPersentase();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pctUni]);
+
   const handleSavePct = async () => {
     if (!misiInfo?.id) return;
     setPctSaving(true);
     try {
-      // Slider = "fraction to Misi" → pct_jemaat = 1 - slider.
-      // KH (Khusus) fixed to 0% locked — tidak diedit.
+      // ===== Model "Uni + Misi ≤ 100, Jemaat = sisa" (Jerry 2026-09-09) =====
+      // Slider = PORSI MISI. Save: pct_*_jemaat = DERIVED jemaat
+      // = (100 - misi - uni)/100. KH tetap 0 (100% di Jemaat).
+      const uniX = Math.round((pctUni?.pct_x_uni ?? 0) * 100);
+      const uniPT = Math.round((pctUni?.pct_pt_uni ?? 0) * 100);
       await api.post('/v1/master/persentase', {
         scope: 'MISI',
         ref_id: misiInfo.id,
-        pct_x_jemaat: (100 - pctX) / 100,
-        pct_pt_jemaat: (100 - pctPT) / 100,
+        pct_x_jemaat: Math.max(0, (100 - pctX - uniX) / 100),
+        pct_pt_jemaat: Math.max(0, (100 - pctPT - uniPT) / 100),
         pct_khusus_jemaat: 0,
-        pct_x_uni: 0,
-        pct_pt_uni: 0,
-        pct_khusus_uni: 0,
+        pct_x_uni: pctUni?.pct_x_uni ?? 0,
+        pct_pt_uni: pctUni?.pct_pt_uni ?? 0,
+        pct_khusus_uni: pctUni?.pct_khusus_uni ?? 0,
       });
       alert('✅ Persentase berhasil diperbarui');
       setPctEditing(false);
@@ -268,14 +278,20 @@ const AuditorDashboard = () => {
                   Perpuluhan (X) ke Misi
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fcd34d', margin: 0 }}>{pctX}%</p>
-                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Sisa di Jemaat: {100 - pctX}%</p>
+                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+                  Ke Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                  {Math.max(0, 100 - pctX - Math.round((pctUni?.pct_x_uni ?? 0) * 100))}%
+                </p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 16 }}>
                 <p style={{ fontSize: 11, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
                   Persembahan (PT) ke Misi
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fcd34d', margin: 0 }}>{pctPT}%</p>
-                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Sisa di Jemaat: {100 - pctPT}%</p>
+                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+                  Ke Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                  {Math.max(0, 100 - pctPT - Math.round((pctUni?.pct_pt_uni ?? 0) * 100))}%
+                </p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16, opacity: 0.7 }}>
                 <p style={{ fontSize: 11, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
@@ -294,11 +310,15 @@ const AuditorDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100)}
                   value={pctX}
                   onChange={(e) => setPctX(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
+                <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
+                  Maksimal {100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% karena{' '}
+                  {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% sudah dialokasikan ke Uni.
+                </p>
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, opacity: 0.9, marginBottom: 8 }}>
@@ -307,11 +327,15 @@ const AuditorDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}
                   value={pctPT}
                   onChange={(e) => setPctPT(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
+                <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
+                  Maksimal {100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% karena{' '}
+                  {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% sudah dialokasikan ke Uni.
+                </p>
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                 <button

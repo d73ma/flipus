@@ -103,6 +103,9 @@ const AdminDashboard = () => {
   const [pctX, setPctX] = useState(50);
   const [pctPT, setPctPT] = useState(50);
   const [pctSaving, setPctSaving] = useState(false);
+  // Porsi Misi existing (max di semua misi gua uni) — untuk hitung max slider Uni
+  const [maxMisiX, setMaxMisiX] = useState(0);
+  const [maxMisiPT, setMaxMisiPT] = useState(0);
 
   const fetchSabatInfo = async () => {
     try {
@@ -149,6 +152,34 @@ const AdminDashboard = () => {
       // pct_x_uni (benar) tapi read pakai pct_x_jemaat (salah).
       setPctX(Math.round((r.data.pct_x_uni ?? 0) * 100));
       setPctPT(Math.round((r.data.pct_pt_uni ?? 0) * 100));
+      // Load porsi misi existing (buat cap slider uni)
+      await fetchMisiAllocations();
+    } catch (e) {}
+  };
+
+  // Ambil semua MISI cfg di uni ini → misi share = 1 - jemaat - uni(sekarang).
+  // Slider Uni max = 100 - misi_share (supaya Uni + Misi ≤ 100).
+  const fetchMisiAllocations = async () => {
+    if (!uniInfo?.id) return;
+    try {
+      const misiList = await api.get<any[]>('/v1/master/misi', { params: { uni_id: uniInfo.id } });
+      let maxX = 0;
+      let maxPT = 0;
+      for (const m of misiList.data) {
+        try {
+          const cfg = await api.get<PersentaseConfig>('/v1/master/persentase', {
+            params: { scope: 'MISI', ref_id: m.id },
+          });
+          const misiX = Math.round((1 - (cfg.data.pct_x_jemaat ?? 1)) * 100);
+          const misiPT = Math.round((1 - (cfg.data.pct_pt_jemaat ?? 1)) * 100);
+          maxX = Math.max(maxX, misiX);
+          maxPT = Math.max(maxPT, misiPT);
+        } catch (e) {
+          // misi tanpa cfg = 0% ke misi
+        }
+      }
+      setMaxMisiX(maxX);
+      setMaxMisiPT(maxPT);
     } catch (e) {}
   };
 
@@ -248,14 +279,14 @@ const AdminDashboard = () => {
                   Perpuluhan (X) ke Uni
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fde68a', margin: 0 }}>{pctX}%</p>
-                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Sisa di Misi: {100 - pctX}%</p>
+                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Misi sudah {maxMisiX}% · Sisa di Jemaat: {Math.max(0, 100 - pctX - maxMisiX)}%</p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 16 }}>
                 <p style={{ fontSize: 11, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
                   Persembahan (PT) ke Uni
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fde68a', margin: 0 }}>{pctPT}%</p>
-                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Sisa di Misi: {100 - pctPT}%</p>
+                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Misi sudah {maxMisiPT}% · Sisa di Jemaat: {Math.max(0, 100 - pctPT - maxMisiPT)}%</p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16, opacity: 0.7 }}>
                 <p style={{ fontSize: 11, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
@@ -274,11 +305,15 @@ const AdminDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={100 - maxMisiX}
                   value={pctX}
                   onChange={(e) => setPctX(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
+                <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
+                  Maksimal {100 - maxMisiX}% karena {maxMisiX}% sudah dialokasikan ke Misi.
+                  Sisa untuk Jemaat akan {Math.max(0, 100 - pctX - maxMisiX)}%.
+                </p>
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, opacity: 0.9, marginBottom: 8 }}>
@@ -287,11 +322,15 @@ const AdminDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={100 - maxMisiPT}
                   value={pctPT}
                   onChange={(e) => setPctPT(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
+                <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
+                  Maksimal {100 - maxMisiPT}% karena {maxMisiPT}% sudah dialokasikan ke Misi.
+                  Sisa untuk Jemaat akan {Math.max(0, 100 - pctPT - maxMisiPT)}%.
+                </p>
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                 <button
