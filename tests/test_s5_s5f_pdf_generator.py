@@ -32,13 +32,14 @@ class TestHexToReportlab:
 
 class TestFmtRupiah:
     def test_zero(self) -> None:
-        assert _fmt_rupiah(0) == "Rp 0"
+        # FASE 5 — nominal tanpa prefix "Rp" (footer note jelaskan satuan)
+        assert _fmt_rupiah(0) == "0"
 
     def test_thousands(self) -> None:
-        assert _fmt_rupiah(1000) == "Rp 1.000"
+        assert _fmt_rupiah(1000) == "1.000"
 
     def test_millions(self) -> None:
-        assert _fmt_rupiah(1_500_000) == "Rp 1.500.000"
+        assert _fmt_rupiah(1_500_000) == "1.500.000"
 
 
 class TestGenerateMingguanPdf:

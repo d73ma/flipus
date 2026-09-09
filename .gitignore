@@ -94,3 +94,7 @@ frontend_dist
 # ngrok config (contains authtoken — jangan commit)
 ngrok.yml
 .ngrok/
+
+# Generated laporan PDFs (runtime artifacts)
+storage/laporan/
+storage/temp/

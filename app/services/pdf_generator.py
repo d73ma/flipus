@@ -24,7 +24,7 @@ from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
@@ -35,6 +35,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from sqlalchemy.orm import Session
 
 from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
@@ -81,8 +82,63 @@ def _get_logo_image(tenant: Tenant, max_height_cm: float = 2.0):
 
 
 def _fmt_rupiah(amount: int) -> str:
-    """Format integer jadi 'Rp 1.500.000'."""
-    return f"Rp {amount:,}".replace(",", ".")
+    """Format integer jadi '1.500.000' (titik ribuan Indonesia, tanpa prefix).
+
+    (Tadinya 'Rp 1.500.000' — sesuai permintaan Jerry, semua cell nominal
+    dalam tabel PDF kini tanpa prefix 'Rp'; footer note menjelaskan satuan.)
+    """
+    if amount is None:
+        return "0"
+    return f"{amount:,}".replace(",", ".")
+
+
+def _compute_kategori_breakdown(db, kuitansi_ids: list[int]) -> tuple[list[str], dict[int, dict[str, int]]]:
+    """
+    Ambil breakdown per-jenis persembahan khusus (selain X & PT) dari pivot.
+
+    Returns:
+        special_jenis: ordered list of UPPERCASE nama jenis yang muncul.
+        breakdown: {kuitansi_id: {jenis_upper: nominal}}
+    """
+    if not db or not kuitansi_ids:
+        return [], {}
+    from app.models.kategori_pemasukan import KategoriPemasukan, KuitansiKategori
+
+    pivots = (
+        db.query(KuitansiKategori)
+        .filter(KuitansiKategori.kuitansi_id.in_(kuitansi_ids))
+        .all()
+    )
+    if not pivots:
+        return [], {}
+
+    kategori_ids = {p.kategori_id for p in pivots}
+    kategori_by_id = {
+        k.id: k
+        for k in db.query(KategoriPemasukan)
+        .filter(KategoriPemasukan.id.in_(kategori_ids))
+        .all()
+    }
+
+    breakdown: dict[int, dict[str, int]] = {}
+    special_jenis: list[str] = []
+    seen: set[str] = set()
+    for p in pivots:
+        kat = kategori_by_id.get(p.kategori_id)
+        if not kat:
+            continue
+        if kat.alias in ("X", "PT"):
+            continue
+        nama_upper = (kat.nama or "").upper()
+        if not nama_upper:
+            continue
+        if nama_upper not in seen:
+            seen.add(nama_upper)
+            special_jenis.append(nama_upper)
+        row = breakdown.setdefault(p.kuitansi_id, {})
+        row[nama_upper] = row.get(nama_upper, 0) + (p.nominal or 0)
+
+    return special_jenis, breakdown
 
 
 def _build_styles(primary_color=colors.HexColor("#1B4332")):
@@ -219,6 +275,7 @@ def generate_mingguan_pdf(
     id_rekap_mingguan: str,
     tanggal_sabat_iso: str,
     output_path: str | None = None,
+    db: Session | None = None,
 ) -> bytes:
     # Tahap 21: tenant branding
     primary_color, secondary_color = _get_tenant_colors(tenant)
@@ -241,7 +298,7 @@ def generate_mingguan_pdf(
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=A4,
+        pagesize=landscape(A4),
         leftMargin=2 * cm,
         rightMargin=2 * cm,
         topMargin=1.5 * cm,
@@ -274,44 +331,72 @@ def generate_mingguan_pdf(
     elements.append(Spacer(1, 10))
 
     # === TABEL KUITANSI (aggregate only — no nama pemberi) ===
-    data = [["No", "No. Kuitansi", "X", "PT", "Khusus", "Total", "Porsi Misi", "Porsi Jemaat"]]
+    # Kolom "Khusus" kini DINAMIS: setiap jenis persembahan khusus (selain
+    # X/PT) jadi kolom terpisah. Contoh: PEMBANGUNAN, PENDIDIKAN, dll.
+    kuitansi_ids = [k.id for k in kuitansi_list]
+    special_jenis, kategori_breakdown = _compute_kategori_breakdown(db, kuitansi_ids)
 
-    sum_x = sum_pt = sum_khusus = 0
+    header = ["No", "No. Kuitansi", "X", "PT"] + special_jenis + ["Total", "Porsi Misi", "Porsi Jemaat"]
+    data = [header]
+
+    sum_x = sum_pt = 0
     sum_misi = sum_jemaat = 0
+    sum_special: dict[str, int] = {j: 0 for j in special_jenis}
 
     for idx, k in enumerate(kuitansi_list, 1):
-        data.append([
+        kb = kategori_breakdown.get(k.id, {})
+        row = [
             str(idx),
             k.nomor_kuitansi,
             _fmt_rupiah(k.perpuluhan_x_angka),
             _fmt_rupiah(k.pt_angka),
-            _fmt_rupiah(k.khusus_angka) if k.khusus_angka else "-",
+        ]
+        for j in special_jenis:
+            val = kb.get(j, 0)
+            row.append(_fmt_rupiah(val) if val else "-")
+            sum_special[j] += val
+        row += [
             _fmt_rupiah(k.total_pemberian_angka),
             _fmt_rupiah(k.porsi_kantor_misi),
             _fmt_rupiah(k.porsi_kas_jemaat),
-        ])
+        ]
+        data.append(row)
         sum_x += k.perpuluhan_x_angka
         sum_pt += k.pt_angka
-        sum_khusus += k.khusus_angka
         sum_misi += k.porsi_kantor_misi
         sum_jemaat += k.porsi_kas_jemaat
 
     # Grand total row
     grand_total = sum_x + sum_pt
-    data.append([
+    _grand = [
         "",
         "<b>GRAND TOTAL</b>",
         f"<b>{_fmt_rupiah(sum_x)}</b>",
         f"<b>{_fmt_rupiah(sum_pt)}</b>",
-        f"<b>{_fmt_rupiah(sum_khusus) if sum_khusus else '-'}</b>",
+    ]
+    for j in special_jenis:
+        _grand.append(f"<b>{_fmt_rupiah(sum_special[j]) if sum_special[j] else '-'}</b>")
+    _grand += [
         f"<b>{_fmt_rupiah(grand_total)}</b>",
         f"<b>{_fmt_rupiah(sum_misi)}</b>",
         f"<b>{_fmt_rupiah(sum_jemaat)}</b>",
-    ])
+    ]
+    data.append(_grand)
+
+    # Dynamic colWidths (landscape A4 = 29.7cm, margin 2cm → 25.7cm usable)
+    _fixed_start = [1 * cm, 3.2 * cm, 1.6 * cm, 1.6 * cm]
+    _fixed_end = [2.2 * cm, 2.0 * cm, 2.0 * cm]
+    _used = sum([1, 3.2, 1.6, 1.6, 2.2, 2.0, 2.0])  # cm
+    _available = 25.7 - _used
+    colWidths = _fixed_start
+    if special_jenis:
+        _w = (_available / len(special_jenis)) * cm
+        colWidths += [_w] * len(special_jenis)
+    colWidths += _fixed_end
 
     table = Table(
         data,
-        colWidths=[1 * cm, 3.8 * cm, 1.8 * cm, 1.8 * cm, 1.8 * cm, 2.2 * cm, 2.2 * cm, 2.2 * cm],
+        colWidths=colWidths,
         repeatRows=1,
     )
     table.setStyle(TableStyle([
@@ -341,6 +426,13 @@ def generate_mingguan_pdf(
         ("BOX", (0, 0), (-1, -1), 1, primary_color),
     ]))
     elements.append(table)
+    elements.append(Spacer(1, 4))
+
+    # Footer note — jelaskan satuan (nominal tanpa prefix Rp di cell)
+    elements.append(Paragraph(
+        "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
+        ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
+    ))
     elements.append(Spacer(1, 10))
 
     # Terbilang
@@ -396,6 +488,158 @@ def generate_mingguan_pdf(
     ))
 
     # Build PDF
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    if output_path:
+        with open(output_path, "wb") as f:
+            f.write(pdf_bytes)
+        return pdf_bytes
+
+    return pdf_bytes
+
+
+_STATUS_LABEL = {
+    "draft": "Draft",
+    "pending_approval": "Pending Approval",
+    "approved_ketua": "Disetujui Ketua",
+    "approved": "Disetujui",
+    "rejected": "Ditolak",
+}
+
+
+def generate_pengeluaran_pdf(
+    pengeluaran_list,
+    kategori_map: dict[int, str],
+    tenant: Tenant,
+    start_date: str,
+    end_date: str,
+    output_path: str | None = None,
+) -> bytes:
+    """Generate PDF Laporan Pengeluaran (LANDSCAPE A4, tanpa prefix Rp).
+
+    Kolom: No | Tanggal | Kategori | Penerima | Metode Bayar | Jumlah |
+    Deskripsi | Status Approval. Grand total + footer note satuan Rupiah.
+    """
+    primary_color, secondary_color = _get_tenant_colors(tenant)
+    logo_image = _get_logo_image(tenant)
+    styles = _build_styles(primary_color)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+    )
+
+    elements = []
+
+    # === HEADER ===
+    elements.append(_build_header_table(
+        uni_name=tenant.nama_uni,
+        misi_name=tenant.nama_kantor_misi,
+        jemaat_name=tenant.nama_jemaat_lokal,
+        primary_color=primary_color,
+        logo_image=logo_image,
+    ))
+    elements.append(Spacer(1, 8))
+
+    # Title + subtitle
+    elements.append(Paragraph(
+        "<b>LAPORAN PENGELUARAN JEMAAT</b>",
+        ParagraphStyle("title", parent=styles["HeaderTitle"], fontSize=13),
+    ))
+    elements.append(Paragraph(
+        f"Periode: <b>{start_date}</b> s/d <b>{end_date}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"Total Transaksi: <b>{len(pengeluaran_list)}</b>",
+        styles["HeaderSubtitle"],
+    ))
+    elements.append(Spacer(1, 10))
+
+    # === TABEL ===
+    header = ["No", "Tanggal", "Kategori", "Penerima", "Metode Bayar", "Jumlah", "Deskripsi", "Status Approval"]
+    data = [header]
+
+    total_jumlah = 0
+    for idx, p in enumerate(pengeluaran_list, 1):
+        total_jumlah += p.jumlah or 0
+        data.append([
+            str(idx),
+            p.tanggal,
+            kategori_map.get(p.kategori_pengeluaran_id, "-"),
+            p.penerima or "-",
+            p.metode_bayar or "-",
+            _fmt_rupiah(p.jumlah),
+            p.deskripsi or "-",
+            _STATUS_LABEL.get(p.status, p.status or "-"),
+        ])
+
+    data.append([
+        "", "", "", "", "",
+        f"<b>{_fmt_rupiah(total_jumlah)}</b>",
+        "<b>GRAND TOTAL</b>",
+        "",
+    ])
+
+    table = Table(
+        data,
+        colWidths=[0.8 * cm, 2.2 * cm, 3.0 * cm, 3.0 * cm, 2.4 * cm, 2.4 * cm, 6.5 * cm, 3.0 * cm],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), primary_color),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
+        ("ALIGN", (5, 1), (5, -1), "RIGHT"),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
+        ("ALIGN", (1, 1), (1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, -1), (-1, -1), primary_color),
+        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+        ("BOX", (0, 0), (-1, -1), 1, primary_color),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 4))
+
+    elements.append(Paragraph(
+        "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
+        ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
+    ))
+    elements.append(Spacer(1, 10))
+
+    elements.append(Paragraph(
+        f"<b>Terbilang:</b> {rupiah_to_words(total_jumlah)} rupiah",
+        ParagraphStyle("terbilang", fontSize=10, fontName="Helvetica-Bold"),
+    ))
+    elements.append(Spacer(1, 16))
+
+    # === FOOTER ===
+    elements.append(_build_footer_table(
+        pendeta=tenant.nama_pendeta or "",
+        ketua=tenant.nama_ketua_keuangan or "",
+        bendahara=tenant.nama_bendahara or "",
+    ))
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph(
+        f"<font size=7 color=gray>Dokumen ini dihasilkan otomatis oleh FLIPUS pada "
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.</font>",
+        ParagraphStyle("footer", alignment=TA_RIGHT, fontSize=7, textColor=COLOR_GRAY),
+    ))
+
     doc.build(elements)
     pdf_bytes = buffer.getvalue()
     buffer.close()

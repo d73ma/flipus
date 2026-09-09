@@ -35,6 +35,7 @@ from app.core.tenant_scope import (
 )
 from app.models.kategori_pengeluaran import KategoriPengeluaran
 from app.models.pengeluaran import Pengeluaran
+from app.models.tenant import Tenant
 
 router = APIRouter()
 
@@ -619,3 +620,93 @@ def rekap_bulanan(
         count_pending=count_pending,
         by_kategori=by_kategori,
     )
+
+
+@router.get("/pengeluaran/laporan/pdf", tags=['Pengeluaran'])
+def laporan_pengeluaran_pdf(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    db: Session = Depends(get_db),
+    scope: TenantScope = Depends(require_tenant_scope),
+):
+    """FASE 5 — Generate PDF Laporan Pengeluaran (landscape A4).
+
+    Filter tanggal: start_date & end_date (YYYY-MM-DD). Kalau kosong,
+    default bulan berjalan. Simpan ke storage/laporan/<tenant_id>/ lalu
+    return URL (di-serve via /storage static mount).
+    """
+    import os as _os
+    from pathlib import Path as _Path
+
+    tid = scope.primary_tenant_id
+    if not tid:
+        raise HTTPException(404, "Tenant tidak ditemukan")
+
+    # Default bulan berjalan
+    if not start_date:
+        start_date = datetime.now().strftime("%Y-%m-01")
+    if not end_date:
+        # Last day bulan ini
+        now = datetime.now()
+        if now.month == 12:
+            end_date = f"{now.year}-12-31"
+        else:
+            nxt = datetime(now.year, now.month + 1, 1)
+            last = (nxt - __import__("datetime").timedelta(days=1))
+            end_date = last.strftime("%Y-%m-%d")
+
+    rows = (
+        db.query(Pengeluaran)
+        .filter(Pengeluaran.tenant_id == tid)
+        .filter(Pengeluaran.is_purged == False)  # noqa: E712
+        .filter(Pengeluaran.tanggal >= start_date)
+        .filter(Pengeluaran.tanggal <= end_date)
+        .order_by(Pengeluaran.tanggal.asc(), Pengeluaran.id.asc())
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(404, f"Tidak ada pengeluaran antara {start_date} s/d {end_date}")
+
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant:
+        raise HTTPException(404, "Tenant tidak ditemukan")
+
+    # Lookup kategori bulk
+    kat_ids = {r.kategori_pengeluaran_id for r in rows}
+    kat_map: dict[int, str] = {}
+    if kat_ids:
+        kats = db.query(KategoriPengeluaran).filter(KategoriPengeluaran.id.in_(kat_ids)).all()
+        kat_map = {k.id: k.nama for k in kats}
+
+    pdf_dir = _Path(_os.path.join(_os.getcwd(), "storage", "laporan", str(tid)))
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+
+    pdf_filename = f"laporan_pengeluaran_{start_date}_{end_date}.pdf"
+    pdf_path = pdf_dir / pdf_filename
+
+    from app.services.pdf_generator import generate_pengeluaran_pdf
+
+    try:
+        generate_pengeluaran_pdf(
+            pengeluaran_list=rows,
+            kategori_map=kat_map,
+            tenant=tenant,
+            start_date=start_date,
+            end_date=end_date,
+            output_path=str(pdf_path),
+        )
+    except Exception as e:
+        raise HTTPException(
+            500,
+            f"Gagal generate PDF: {type(e).__name__}: {e}",
+        ) from e
+
+    pdf_url = f"/storage/laporan/{tid}/{pdf_filename}"
+    return {
+        "status": "ok",
+        "pdf_url": pdf_url,
+        "start_date": start_date,
+        "end_date": end_date,
+        "count": len(rows),
+    }

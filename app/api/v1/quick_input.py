@@ -282,7 +282,9 @@ def quick_input(
         # Populate legacy fields (backward-compat dengan reporting v1.5)
         perpuluhan_x_angka=sum(n for k, n in pivot_data if k.alias == "X"),
         pt_angka=sum(n for k, n in pivot_data if k.alias == "PT"),
-        khusus_angka=sum(n for k, n in pivot_data if k.alias == "KHUS"),
+        # FASE 5 — "Khusus" = SUM semua jenis SELAIN X & PT (pembangunan,
+        # pendidikan, sekolah sabat, hari lahir, dll.), bukan hanya alias "KHUS".
+        khusus_angka=sum(n for k, n in pivot_data if k.alias not in ("X", "PT")),
         total_pemberian_angka=total,
         # Status (v2.0: DRAFT dulu, approval Ketua→Pendeta)
         # Untuk v1.5 backward-compat, default 'finalized'

@@ -778,13 +778,13 @@ const BendaharaDashboard = () => {
                     <td style={{ ...tdStyle, color: '#6b7280' }}>{item.no}</td>
                     <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 11 }}>{item.nomor_kuitansi}</td>
                     <td style={tdStyle}>{item.nama_pemberi || '—'}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>Rp {item.perpuluhan_x_angka.toLocaleString()}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>Rp {item.pt_angka.toLocaleString()}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>{item.perpuluhan_x_angka.toLocaleString('id-ID')}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>{item.pt_angka.toLocaleString('id-ID')}</td>
                     <td style={{ ...tdStyle, textAlign: 'right', color: '#6b7280' }}>
-                      {item.khusus_angka > 0 ? `Rp ${item.khusus_angka.toLocaleString()}` : '—'}
+                      {item.khusus_angka > 0 ? item.khusus_angka.toLocaleString('id-ID') : '—'}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#1B4332' }}>
-                      Rp {item.total.toLocaleString()}
+                      {item.total.toLocaleString('id-ID')}
                     </td>
                   </tr>
                   <tr style={{ background: '#f0f9ff', borderBottom: '1px dotted #bae6fd' }}>
@@ -830,11 +830,11 @@ const BendaharaDashboard = () => {
               <tfoot>
                 <tr style={{ background: '#FAF9F5', borderTop: '2px solid #1B4332', fontWeight: 700, color: '#1B4332' }}>
                   <td colSpan={3} style={tdStyle}>Total Keseluruhan</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>Rp {sabatIni.grand_total_x.toLocaleString()}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>Rp {sabatIni.grand_total_pt.toLocaleString()}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>Rp {sabatIni.grand_total_khusus.toLocaleString()}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{sabatIni.grand_total_x.toLocaleString('id-ID')}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{sabatIni.grand_total_pt.toLocaleString('id-ID')}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{sabatIni.grand_total_khusus.toLocaleString('id-ID')}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', color: '#B8860B' }}>
-                    Rp {sabatIni.grand_total_semua.toLocaleString()}
+                    {sabatIni.grand_total_semua.toLocaleString('id-ID')}
                   </td>
                 </tr>
                 <tr style={{ background: '#f0f9ff' }}>
@@ -888,6 +888,12 @@ const BendaharaDashboard = () => {
           <div style={{ padding: '12px 24px', background: '#FAF9F5', fontSize: 12, color: '#374151', borderTop: '1px solid #e5e7eb' }}>
             <span style={{ fontWeight: 600 }}>Terbilang:</span> {sabatIni.grand_total_huruf}
           </div>
+        )}
+
+        {sabatIni && sabatIni.items.length > 0 && (
+          <p className="text-xs text-gray-500 italic" style={{ padding: '0 24px 12px', margin: 0 }}>
+            Nominal dalam bentuk Rupiah (Rp)
+          </p>
         )}
       </div>
 

@@ -219,6 +219,21 @@ export default function PengeluaranInput() {
     }
   }
 
+  async function handleDownloadPDF() {
+    // FASE 5 — download laporan pengeluaran PDF (default bulan terpilih di filter)
+    setError(null);
+    try {
+      const [y, m] = filterBulan.split('-').map(Number);
+      const start = `${filterBulan}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      const end = `${filterBulan}-${String(lastDay).padStart(2, '0')}`;
+      const resp = await api.get(`/v1/pengeluaran/laporan/pdf?start_date=${start}&end_date=${end}`);
+      window.open(resp.data.pdf_url, '_blank');
+    } catch (e: any) {
+      setError(e.response?.data?.detail || 'Gagal generate PDF laporan pengeluaran');
+    }
+  }
+
   async function handleAddKategori() {
     if (!newKatNama.trim() || !newKatAlias.trim()) {
       setError('Nama dan alias kategori wajib diisi');
@@ -510,7 +525,24 @@ export default function PengeluaranInput() {
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1B4332' }}>📋 Daftar Pengeluaran</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleDownloadPDF}
+              style={{
+                padding: '10px 16px',
+                background: '#1B4332',
+                color: 'white',
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+              }}
+            >
+              📄 Download Laporan Pengeluaran
+            </button>
             <span style={{ fontSize: 12, color: '#6b7280' }}>Bulan:</span>
             <input
               type="month"

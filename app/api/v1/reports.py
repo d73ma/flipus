@@ -376,6 +376,7 @@ def _blast_weekly_impl(request, db, current_user):
             id_rekap_mingguan=id_rekap_mingguan,
             tanggal_sabat_iso=str(rows[0].tanggal_sabat),
             output_path=str(pdf_path),
+            db=db,
         )
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Gagal generate PDF: {e}") from e
@@ -708,6 +709,7 @@ def _generate_laporan_keuangan_impl(payload, db, current_user, logger):
             id_rekap_mingguan=id_rekap_range,
             tanggal_sabat_iso=tanggal_range,
             output_path=str(pdf_path),
+            db=db,
         )
     except Exception as e:
         import traceback
