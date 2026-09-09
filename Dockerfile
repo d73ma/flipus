@@ -38,6 +38,7 @@ COPY --from=backend-builder /install /usr/local
 # Backend app + storage
 COPY app /app/app
 COPY storage /app/storage
+RUN ls -la /app && ls -la /app/app
 RUN mkdir -p storage/temp storage/amplop_records storage/backups
 
 # Frontend static build → /app/frontend_dist (path yang diharapkan main.py)
