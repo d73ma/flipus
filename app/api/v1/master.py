@@ -64,7 +64,12 @@ def list_misi(
     uni_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    """Public — list Misi. Filter by uni_id jika ada."""
+    """Public — list Misi. Filter by uni_id jika ada.
+
+    FASE 5 — auto-ensure 13 Daerah UKIKT (konferens + misi) supaya dropdown
+    pendaftaran selalu lengkap di semua environment (dev/railway).
+    """
+    _ensure_ukikt_daerah(db)
     return _cached_list_misi(db, uni_id)
 
 
@@ -74,6 +79,66 @@ def _cached_list_misi(db: Session, uni_id: int | None = None):
     if uni_id is not None:
         q = q.filter(MisiKonferens.uni_id == uni_id)
     return q.order_by(MisiKonferens.jenis, MisiKonferens.kode).all()
+
+
+# === 13 Daerah UKIKT (2026-09-09, Jerry) ===
+# 3 Daerah Konferens + 10 Daerah Misi. Nama persis dipakai di dropdown.
+_UKIKT_KONFERENS = [
+    ("DK_MINHA", "Daerah Konferens Minahasa"),
+    ("DK_MANMU", "Daerah Konferens Manado & Maluku Utara"),
+    ("DK_SULSSELBARTRA", "Daerah Konferens Sulselbartra"),
+]
+_UKIKT_MISI = [
+    ("M01_MIN_UTR_BTG", "Daerah Misi Minut & Bitung"),
+    ("M02_BOLMONG", "Daerah Misi Bolmong-Gorontalo"),
+    ("M03_NUSAUTARA", "Daerah Misi Nusa Utara"),
+    ("M03_SULTENG", "Daerah Misi Sulawesi Tengah"),
+    ("M04_LUWUTORAJA", "Daerah Misi Luwu & Tana Toraja"),
+    ("M05_PAPUA", "Daerah Misi Papua"),
+    ("M06_PAPUATENGAH", "Daerah Misi Papua Tengah"),
+    ("M07_PAPUABARAT", "Daerah Misi Papua Barat"),
+    ("M08_PAPUABARATDAYA", "Daerah Misi Papua Barat Daya"),
+    ("M09_MALUKU", "Daerah Misi Maluku"),
+]
+
+
+def _ensure_ukikt_daerah(db: Session) -> None:
+    """Idempotent: pastikan 13 Daerah UKIKT ada di misi_konferens.
+
+    - Buat / re-use Uni UKIKT (kode 'UKIKT') sebagai induk.
+    - Tambah row yang belum ada (identifikasi by kode). Nama row lama yang
+      namanya berubah di-update supaya tetap satu source of truth.
+    """
+    uni = db.query(Uni).filter(Uni.kode == "UKIKT").first()
+    if not uni:
+        uni = Uni(kode="UKIKT", nama_resmi="GMAHK UKIKT")
+        db.add(uni)
+        db.flush()
+
+    kode_to_nama = dict(_UKIKT_KONFERENS + _UKIKT_MISI)
+    kode_to_jenis = {k: "KONFERENS" for k, _ in _UKIKT_KONFERENS}
+    kode_to_jenis.update({k: "MISI" for k, _ in _UKIKT_MISI})
+
+    existing = {m.kode: m for m in db.query(MisiKonferens).filter(MisiKonferens.kode.in_(kode_to_nama)).all()}
+
+    changed = False
+    for kode, nama in kode_to_nama.items():
+        row = existing.get(kode)
+        if row is None:
+            db.add(MisiKonferens(uni_id=uni.id, kode=kode, nama_resmi=nama, jenis=kode_to_jenis[kode]))
+            changed = True
+        elif row.nama_resmi != nama or row.jenis != kode_to_jenis[kode]:
+            row.nama_resmi = nama
+            row.jenis = kode_to_jenis[kode]
+            row.uni_id = uni.id
+            changed = True
+
+    if changed:
+        try:
+            db.commit()
+        except Exception as _ensure_exc:
+            db.rollback()
+            _logger.warning("ensure_ukikt_daerah_failed exc=%s", type(_ensure_exc).__name__)
 
 
 # ===== SEED ENDPOINT (Jerry-only: dilindungi license guard via get_current_user) =====

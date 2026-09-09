@@ -1,19 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
+import DaerahMisiKonferensSelect from '../components/DaerahMisiKonferensSelect';
 
 interface Uni {
   id: number;
   kode: string;
   nama_resmi: string;
-}
-
-interface Misi {
-  id: number;
-  uni_id: number;
-  kode: string;
-  nama_resmi: string;
-  jenis: string;
 }
 
 interface CredentialsOut {
@@ -43,7 +36,6 @@ const RegisterPendeta = () => {
 
   // Master data
   const [uniList, setUniList] = useState<Uni[]>([]);
-  const [misiList, setMisiList] = useState<Misi[]>([]);
 
   // Form fields
   const [uniId, setUniId] = useState<number | ''>('');
@@ -60,15 +52,6 @@ const RegisterPendeta = () => {
   useEffect(() => {
     api.get<Uni[]>('/v1/master/uni').then((r) => setUniList(r.data)).catch(() => setError('Gagal load master Uni'));
   }, []);
-
-  useEffect(() => {
-    if (uniId) {
-      api.get<Misi[]>('/v1/master/misi', { params: { uni_id: uniId } }).then((r) => setMisiList(r.data));
-    } else {
-      setMisiList([]);
-      setMisiId('');
-    }
-  }, [uniId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,18 +175,20 @@ const RegisterPendeta = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Daerah Misi/Konferens *</label>
-              <select
-                required
-                disabled={!uniId}
+              <DaerahMisiKonferensSelect
+                uniId={uniId}
                 value={misiId}
-                onChange={(e) => setMisiId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold disabled:bg-gray-50"
-              >
-                <option value="">-- Pilih Misi --</option>
-                {misiList.map((m) => (
-                  <option key={m.id} value={m.id}>{m.nama_resmi}</option>
-                ))}
-              </select>
+                onChange={(id) => setMisiId(id)}
+                disabled={!uniId}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 1rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '1rem',
+                  outline: 'none',
+                  backgroundColor: uniId ? '#fff' : '#f9fafb',
+                }}
+              />
             </div>
           </div>
 
