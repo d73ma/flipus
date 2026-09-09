@@ -27,11 +27,6 @@ const RegisterAdmin = () => {
   const [namaAdminUni, setNamaAdminUni] = useState('');
   const [waAdminUni, setWaAdminUni] = useState('');
 
-  // Default: 0% ke Uni (opsional)
-  const [pctX, setPctX] = useState(0.0);
-  const [pctPT, setPctPT] = useState(0.0);
-  const [pctKhusus, setPctKhusus] = useState(0.0);
-
   useEffect(() => {
     api.get<Uni[]>('/v1/master/uni').then((r) => setUniList(r.data)).catch(() => setError('Gagal load master Uni'));
   }, []);
@@ -47,9 +42,6 @@ const RegisterAdmin = () => {
         wa_bendahara_uni: waBendaharaUni || null,
         nama_admin_uni: namaAdminUni,
         wa_admin_uni: waAdminUni || null,
-        pct_x_uni: pctX,
-        pct_pt_uni: pctPT,
-        pct_khusus_uni: pctKhusus,
       };
       const r = await api.post<RegisterAdminOut>('/v1/register/admin', payload);
       setResult(r.data);
@@ -111,7 +103,7 @@ const RegisterAdmin = () => {
       <div className="max-w-3xl mx-auto px-6 py-12">
         <div className="mb-8">
           <h2 className="text-4xl font-display text-sabbath-dark mb-2">Daftar sebagai Admin Uni</h2>
-          <p className="text-gray-600">Isi data Uni, pejabat, dan persentase pembagian dari misi ke Uni.</p>
+          <p className="text-gray-600">Isi data Uni dan pejabat. Persentase pembagian diatur setelah login di halaman Pengaturan.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-sm p-8 space-y-6">
@@ -154,33 +146,6 @@ const RegisterAdmin = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nomor WA</label>
                 <input type="tel" value={waAdminUni} onChange={(e) => setWaAdminUni(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset className="border-t border-gray-200 pt-6">
-            <legend className="text-lg font-display text-sabbath-dark mb-4">Persentase Pembagian (Misi → Uni)</legend>
-            <p className="text-sm text-gray-600 mb-4">
-              Berlaku untuk semua misi/konferens di Uni ini. Default 0% (opsional).
-            </p>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% X *</label>
-                <input type="number" required min={0} max={1} step={0.01} value={pctX} onChange={(e) => setPctX(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctX * 100).toFixed(0)}% ke Uni</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% PT *</label>
-                <input type="number" required min={0} max={1} step={0.01} value={pctPT} onChange={(e) => setPctPT(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctPT * 100).toFixed(0)}% ke Uni</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% Khusus</label>
-                <input type="number" min={0} max={1} step={0.01} value={pctKhusus} onChange={(e) => setPctKhusus(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctKhusus * 100).toFixed(0)}% ke Uni</p>
               </div>
             </div>
           </fieldset>

@@ -29,11 +29,6 @@ const RegisterAuditor = () => {
   const [namaAuditor, setNamaAuditor] = useState('');
   const [waAuditor, setWaAuditor] = useState('');
 
-  // Persentase (default 100% X ke misi, 50% PT)
-  const [pctX, setPctX] = useState(1.0);
-  const [pctPT, setPctPT] = useState(0.5);
-  const [pctKhusus, setPctKhusus] = useState(0.0);
-
   useEffect(() => {
     api.get<Uni[]>('/v1/master/uni').then((r) => setUniList(r.data)).catch(() => setError('Gagal load master Uni'));
   }, []);
@@ -50,9 +45,6 @@ const RegisterAuditor = () => {
         wa_bendahara_misi: waBendaharaMisi || null,
         nama_auditor: namaAuditor,
         wa_auditor: waAuditor || null,
-        pct_x_jemaat: pctX,
-        pct_pt_jemaat: pctPT,
-        pct_khusus_jemaat: pctKhusus,
       };
       const r = await api.post<RegisterAuditorOut>('/v1/register/auditor', payload);
       setResult(r.data);
@@ -116,7 +108,7 @@ const RegisterAuditor = () => {
       <div className="max-w-3xl mx-auto px-6 py-12">
         <div className="mb-8">
           <h2 className="text-4xl font-display text-sabbath-dark mb-2">Daftar sebagai Auditor Misi</h2>
-          <p className="text-gray-600">Isi data misi, pejabat, dan persentase pembagian. Konfigurasi ini akan langsung berlaku untuk semua jemaat di misi Anda.</p>
+          <p className="text-gray-600">Isi data misi dan pejabat. Persentase pembagian diatur setelah login di halaman Pengaturan.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-sm p-8 space-y-6">
@@ -178,33 +170,6 @@ const RegisterAuditor = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nomor WA</label>
                 <input type="tel" value={waAuditor} onChange={(e) => setWaAuditor(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset className="border-t border-gray-200 pt-6">
-            <legend className="text-lg font-display text-sabbath-dark mb-4">Persentase Pembagian (Jemaat → Misi)</legend>
-            <p className="text-sm text-gray-600 mb-4">
-              Pengaturan ini akan langsung mempengaruhi kalkulasi di dasbor Bendahara semua jemaat di misi Anda.
-            </p>
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% X (Perpuluhan) *</label>
-                <input type="number" required min={0} max={1} step={0.01} value={pctX} onChange={(e) => setPctX(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctX * 100).toFixed(0)}% ke Misi</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% PT *</label>
-                <input type="number" required min={0} max={1} step={0.01} value={pctPT} onChange={(e) => setPctPT(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctPT * 100).toFixed(0)}% ke Misi</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">% Khusus</label>
-                <input type="number" min={0} max={1} step={0.01} value={pctKhusus} onChange={(e) => setPctKhusus(Number(e.target.value))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-sabbath-gold" />
-                <p className="text-xs text-gray-500 mt-1">{(pctKhusus * 100).toFixed(0)}% ke Misi</p>
               </div>
             </div>
           </fieldset>

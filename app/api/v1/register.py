@@ -61,9 +61,12 @@ class RegisterAuditorIn(BaseModel):
     wa_bendahara_misi: str | None = Field(None, max_length=32)
     nama_auditor: str = Field(min_length=2, max_length=120)
     wa_auditor: str | None = Field(None, max_length=32)
-    # Persentase Jemaat→Misi
-    pct_x_jemaat: float = Field(default=1.0, ge=0.0, le=1.0)
-    pct_pt_jemaat: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Persentase Jemaat→Misi — Default 0 (bukan identity 1.0/0.5):
+    # Jika form registrasi TIDAK kirim, gunakan 0 supaya cfg baru tidak
+    # langsung aktifkan porsi. Nilai asli diatur Auditor via dashboard
+    # "Pengaturan Persentase Porsi Misi".
+    pct_x_jemaat: float = Field(default=0.0, ge=0.0, le=1.0)
+    pct_pt_jemaat: float = Field(default=0.0, ge=0.0, le=1.0)
     pct_khusus_jemaat: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
