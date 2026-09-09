@@ -89,3 +89,8 @@ storage/tenants/*/logo_*.png
 storage/tenants/*/logo_*.svg
 storage/tenants/*/logo_*.jpg
 storage/tenants/*/logo_*.jpeg
+frontend_dist
+
+# ngrok config (contains authtoken — jangan commit)
+ngrok.yml
+.ngrok/
