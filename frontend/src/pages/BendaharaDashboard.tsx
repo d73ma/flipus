@@ -151,8 +151,11 @@ const BendaharaDashboard = () => {
 
   // Laporan Keuangan modal
   const [laporanModal, setLaporanModal] = useState(false);
+  // FASE 5 — default range: sabat 1 → sabat TERKINI (setelah sabatInfo dimuat).
+  // Sebelumnya laporanTo hardcoded 34 → kuitansi Sabat ke-35 dst TIDAK ikut
+  // laporan keuangan. Dipatch via useEffect saat sabatInfo tiba.
   const [laporanFrom, setLaporanFrom] = useState(1);
-  const [laporanTo, setLaporanTo] = useState(34);
+  const [laporanTo, setLaporanTo] = useState(1);
   const [laporanResult, setLaporanResult] = useState<LaporanKeuanganResult | null>(null);
   const [laporanLoading, setLaporanLoading] = useState(false);
   const [laporanError, setLaporanError] = useState('');
@@ -173,6 +176,9 @@ const BendaharaDashboard = () => {
     try {
       const r = await api.get<SabatInfoOut>('/v1/reports/sabat-info');
       setSabatInfo(r.data);
+      // FASE 5 — laporan keuangan harus mencakup sabat TERKINI secara default.
+      // Range 4 sabat terakhir (sabat_ke-3 s/d sabat_ke) biar kuitansi baru
+      // (input hari ini) otomatis ikut laporan tanpa manual geser filter.
       setLaporanFrom(Math.max(1, r.data.sabat_ke - 3));
       setLaporanTo(r.data.sabat_ke);
     } catch (e) {}

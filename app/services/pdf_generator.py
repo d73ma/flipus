@@ -42,9 +42,9 @@ from app.models.transaction import Kuitansi
 from app.utils.number_to_words import bilang as rupiah_to_words
 
 # Tahap 21: branding-aware colors
-DEFAULT_PRIMARY = "#1B4332"   # hijau tua (default green)
+DEFAULT_PRIMARY = "#1B4332"  # hijau tua (default green)
 DEFAULT_SECONDARY = "#F5EFE0"  # cream (default)
-COLOR_GOLD = colors.HexColor("#B8860B")    # gold accent (tetap)
+COLOR_GOLD = colors.HexColor("#B8860B")  # gold accent (tetap)
 COLOR_GRAY = colors.HexColor("#666666")
 COLOR_BORDER = colors.HexColor("#CCCCCC")
 
@@ -104,20 +104,13 @@ def _compute_kategori_breakdown(db, kuitansi_ids: list[int]) -> tuple[list[str],
         return [], {}
     from app.models.kategori_pemasukan import KategoriPemasukan, KuitansiKategori
 
-    pivots = (
-        db.query(KuitansiKategori)
-        .filter(KuitansiKategori.kuitansi_id.in_(kuitansi_ids))
-        .all()
-    )
+    pivots = db.query(KuitansiKategori).filter(KuitansiKategori.kuitansi_id.in_(kuitansi_ids)).all()
     if not pivots:
         return [], {}
 
     kategori_ids = {p.kategori_id for p in pivots}
     kategori_by_id = {
-        k.id: k
-        for k in db.query(KategoriPemasukan)
-        .filter(KategoriPemasukan.id.in_(kategori_ids))
-        .all()
+        k.id: k for k in db.query(KategoriPemasukan).filter(KategoriPemasukan.id.in_(kategori_ids)).all()
     }
 
     breakdown: dict[int, dict[str, int]] = {}
@@ -143,38 +136,46 @@ def _compute_kategori_breakdown(db, kuitansi_ids: list[int]) -> tuple[list[str],
 
 def _build_styles(primary_color=colors.HexColor("#1B4332")):
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(
-        name="HeaderTitle",
-        parent=styles["Heading1"],
-        fontSize=14,
-        alignment=TA_CENTER,
-        textColor=primary_color,
-        spaceAfter=2,
-        fontName="Helvetica-Bold",
-    ))
-    styles.add(ParagraphStyle(
-        name="HeaderSubtitle",
-        parent=styles["Normal"],
-        fontSize=10,
-        alignment=TA_CENTER,
-        textColor=primary_color,
-        spaceAfter=4,
-    ))
-    styles.add(ParagraphStyle(
-        name="JemaatName",
-        parent=styles["Normal"],
-        fontSize=11,
-        alignment=TA_LEFT,
-        textColor=primary_color,
-        fontName="Helvetica-Bold",
-        spaceAfter=2,
-    ))
-    styles.add(ParagraphStyle(
-        name="OfficialName",
-        parent=styles["Normal"],
-        fontSize=9,
-        alignment=TA_LEFT,
-    ))
+    styles.add(
+        ParagraphStyle(
+            name="HeaderTitle",
+            parent=styles["Heading1"],
+            fontSize=14,
+            alignment=TA_CENTER,
+            textColor=primary_color,
+            spaceAfter=2,
+            fontName="Helvetica-Bold",
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="HeaderSubtitle",
+            parent=styles["Normal"],
+            fontSize=10,
+            alignment=TA_CENTER,
+            textColor=primary_color,
+            spaceAfter=4,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="JemaatName",
+            parent=styles["Normal"],
+            fontSize=11,
+            alignment=TA_LEFT,
+            textColor=primary_color,
+            fontName="Helvetica-Bold",
+            spaceAfter=2,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="OfficialName",
+            parent=styles["Normal"],
+            fontSize=9,
+            alignment=TA_LEFT,
+        )
+    )
     return styles
 
 
@@ -215,27 +216,35 @@ def _build_header_table(
 
     # 3-column header: Logo | Uni/Misi | Jemaat
     uni_block = Table([[nama_uni], [nama_misi]], colWidths=[8 * cm])
-    uni_block.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
+    uni_block.setStyle(
+        TableStyle(
+            [
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
 
     header_table = Table(
         [[logo_cell, uni_block, nama_jemaat]],
         colWidths=[4 * cm, 9 * cm, 5 * cm],
     )
-    header_table.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LINEBELOW", (0, 0), (-1, 0), 1, primary_color),
-    ]))
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LINEBELOW", (0, 0), (-1, 0), 1, primary_color),
+            ]
+        )
+    )
     return header_table
 
 
@@ -259,13 +268,17 @@ def _build_footer_table(pendeta: str, ketua: str, bendahara: str) -> Table:
     )
 
     table = Table([[cell]], colWidths=[8 * cm])
-    table.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     return table
 
 
@@ -308,26 +321,32 @@ def generate_mingguan_pdf(
     elements = []
 
     # === HEADER ===
-    elements.append(_build_header_table(
-        uni_name=tenant.nama_uni,
-        misi_name=tenant.nama_kantor_misi,
-        jemaat_name=tenant.nama_jemaat_lokal,
-        primary_color=primary_color,
-        logo_image=logo_image,
-    ))
+    elements.append(
+        _build_header_table(
+            uni_name=tenant.nama_uni,
+            misi_name=tenant.nama_kantor_misi,
+            jemaat_name=tenant.nama_jemaat_lokal,
+            primary_color=primary_color,
+            logo_image=logo_image,
+        )
+    )
     elements.append(Spacer(1, 8))
 
     # Title
-    elements.append(Paragraph(
-        "<b>LAPORAN PENERIMAAN PERPULUHAN & PERSEMBAHAN</b>",
-        ParagraphStyle("title", parent=styles["HeaderTitle"], fontSize=13),
-    ))
-    elements.append(Paragraph(
-        f"ID Rekap: <b>{id_rekap_mingguan}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"Tanggal Sabat: <b>{tanggal_sabat_iso}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"Total Kuitansi: <b>{len(kuitansi_list)}</b>",
-        styles["HeaderSubtitle"],
-    ))
+    elements.append(
+        Paragraph(
+            "<b>LAPORAN PENERIMAAN PERPULUHAN & PERSEMBAHAN</b>",
+            ParagraphStyle("title", parent=styles["HeaderTitle"], fontSize=13),
+        )
+    )
+    elements.append(
+        Paragraph(
+            f"ID Rekap: <b>{id_rekap_mingguan}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Tanggal Sabat: <b>{tanggal_sabat_iso}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Total Kuitansi: <b>{len(kuitansi_list)}</b>",
+            styles["HeaderSubtitle"],
+        )
+    )
     elements.append(Spacer(1, 10))
 
     # === TABEL KUITANSI (aggregate only — no nama pemberi) ===
@@ -366,20 +385,22 @@ def generate_mingguan_pdf(
         sum_misi += k.porsi_kantor_misi
         sum_jemaat += k.porsi_kas_jemaat
 
-    # Grand total row
+    # Grand total row — TANPA tag <b>: Table style sudah set FONTNAME
+    # Helvetica-Bold untuk baris terakhir. Tag literal <b> akan tercetak
+    # sebagai teks harfiah karena cell berupa string (bukan Paragraph).
     grand_total = sum_x + sum_pt
     _grand = [
         "",
-        "<b>GRAND TOTAL</b>",
-        f"<b>{_fmt_rupiah(sum_x)}</b>",
-        f"<b>{_fmt_rupiah(sum_pt)}</b>",
+        "GRAND TOTAL",
+        _fmt_rupiah(sum_x),
+        _fmt_rupiah(sum_pt),
     ]
     for j in special_jenis:
-        _grand.append(f"<b>{_fmt_rupiah(sum_special[j]) if sum_special[j] else '-'}</b>")
+        _grand.append(_fmt_rupiah(sum_special[j]) if sum_special[j] else "-")
     _grand += [
-        f"<b>{_fmt_rupiah(grand_total)}</b>",
-        f"<b>{_fmt_rupiah(sum_misi)}</b>",
-        f"<b>{_fmt_rupiah(sum_jemaat)}</b>",
+        _fmt_rupiah(grand_total),
+        _fmt_rupiah(sum_misi),
+        _fmt_rupiah(sum_jemaat),
     ]
     data.append(_grand)
 
@@ -399,47 +420,55 @@ def generate_mingguan_pdf(
         colWidths=colWidths,
         repeatRows=1,
     )
-    table.setStyle(TableStyle([
-        # Header row
-        ("BACKGROUND", (0, 0), (-1, 0), primary_color),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
-        # Body
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
-        ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
-        ("ALIGN", (0, 1), (0, -1), "CENTER"),
-        ("ALIGN", (1, 1), (1, -1), "LEFT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        # Grand total row
-        ("BACKGROUND", (0, -1), (-1, -1), primary_color),
-        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        # Borders
-        ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("BOX", (0, 0), (-1, -1), 1, primary_color),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                # Header row
+                ("BACKGROUND", (0, 0), (-1, 0), primary_color),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 9),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING", (0, 0), (-1, 0), 6),
+                # Body
+                ("FONTSIZE", (0, 1), (-1, -1), 8),
+                ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
+                ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
+                ("ALIGN", (0, 1), (0, -1), "CENTER"),
+                ("ALIGN", (1, 1), (1, -1), "LEFT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                # Grand total row
+                ("BACKGROUND", (0, -1), (-1, -1), primary_color),
+                ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                # Borders
+                ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+                ("BOX", (0, 0), (-1, -1), 1, primary_color),
+            ]
+        )
+    )
     elements.append(table)
     elements.append(Spacer(1, 4))
 
     # Footer note — jelaskan satuan (nominal tanpa prefix Rp di cell)
-    elements.append(Paragraph(
-        "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
-        ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
-    ))
+    elements.append(
+        Paragraph(
+            "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
+            ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
+        )
+    )
     elements.append(Spacer(1, 10))
 
     # Terbilang
-    elements.append(Paragraph(
-        f"<b>Terbilang:</b> {rupiah_to_words(grand_total)} rupiah",
-        ParagraphStyle("terbilang", fontSize=10, fontName="Helvetica-Bold"),
-    ))
+    elements.append(
+        Paragraph(
+            f"<b>Terbilang:</b> {rupiah_to_words(grand_total)} rupiah",
+            ParagraphStyle("terbilang", fontSize=10, fontName="Helvetica-Bold"),
+        )
+    )
     elements.append(Spacer(1, 10))
 
     # Distribution summary box
@@ -450,42 +479,52 @@ def generate_mingguan_pdf(
         ["TOTAL", _fmt_rupiah(sum_misi + sum_jemaat)],
     ]
     dist_table = Table(dist_data, colWidths=[6 * cm, 6 * cm])
-    dist_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), secondary_color),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("BACKGROUND", (0, -1), (-1, -1), COLOR_GOLD),
-        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    dist_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), secondary_color),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+                ("BACKGROUND", (0, -1), (-1, -1), COLOR_GOLD),
+                ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
     elements.append(dist_table)
     elements.append(Spacer(1, 16))
 
     # === FOOTER (pejabat) ===
-    elements.append(_build_footer_table(
-        pendeta=tenant.nama_pendeta or "",
-        ketua=tenant.nama_ketua_keuangan or "",
-        bendahara=tenant.nama_bendahara or "",
-    ))
+    elements.append(
+        _build_footer_table(
+            pendeta=tenant.nama_pendeta or "",
+            ketua=tenant.nama_ketua_keuangan or "",
+            bendahara=tenant.nama_bendahara or "",
+        )
+    )
     # Tahap 21: optional footer text dari tenant
     if tenant.footer_text:
         elements.append(Spacer(1, 4))
-        elements.append(Paragraph(
-            f"<i>{tenant.footer_text}</i>",
-            ParagraphStyle("footer_text", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
-        ))
+        elements.append(
+            Paragraph(
+                f"<i>{tenant.footer_text}</i>",
+                ParagraphStyle("footer_text", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
+            )
+        )
     elements.append(Spacer(1, 6))
 
     # Generator watermark
-    elements.append(Paragraph(
-        f"<font size=7 color=gray>Dokumen ini dihasilkan otomatis oleh FLIPUS v1.1 pada "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. ID: {id_rekap_mingguan}</font>",
-        ParagraphStyle("footer", alignment=TA_RIGHT, fontSize=7, textColor=COLOR_GRAY),
-    ))
+    elements.append(
+        Paragraph(
+            f"<font size=7 color=gray>Dokumen ini dihasilkan otomatis oleh FLIPUS v1.1 pada "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. ID: {id_rekap_mingguan}</font>",
+            ParagraphStyle("footer", alignment=TA_RIGHT, fontSize=7, textColor=COLOR_GRAY),
+        )
+    )
 
     # Build PDF
     doc.build(elements)
@@ -539,106 +578,141 @@ def generate_pengeluaran_pdf(
     elements = []
 
     # === HEADER ===
-    elements.append(_build_header_table(
-        uni_name=tenant.nama_uni,
-        misi_name=tenant.nama_kantor_misi,
-        jemaat_name=tenant.nama_jemaat_lokal,
-        primary_color=primary_color,
-        logo_image=logo_image,
-    ))
+    elements.append(
+        _build_header_table(
+            uni_name=tenant.nama_uni,
+            misi_name=tenant.nama_kantor_misi,
+            jemaat_name=tenant.nama_jemaat_lokal,
+            primary_color=primary_color,
+            logo_image=logo_image,
+        )
+    )
     elements.append(Spacer(1, 8))
 
     # Title + subtitle
-    elements.append(Paragraph(
-        "<b>LAPORAN PENGELUARAN JEMAAT</b>",
-        ParagraphStyle("title", parent=styles["HeaderTitle"], fontSize=13),
-    ))
-    elements.append(Paragraph(
-        f"Periode: <b>{start_date}</b> s/d <b>{end_date}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"Total Transaksi: <b>{len(pengeluaran_list)}</b>",
-        styles["HeaderSubtitle"],
-    ))
+    elements.append(
+        Paragraph(
+            "<b>LAPORAN PENGELUARAN JEMAAT</b>",
+            ParagraphStyle("title", parent=styles["HeaderTitle"], fontSize=13),
+        )
+    )
+    elements.append(
+        Paragraph(
+            f"Periode: <b>{start_date}</b> s/d <b>{end_date}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+            f"Total Transaksi: <b>{len(pengeluaran_list)}</b>",
+            styles["HeaderSubtitle"],
+        )
+    )
     elements.append(Spacer(1, 10))
 
     # === TABEL ===
-    header = ["No", "Tanggal", "Kategori", "Penerima", "Metode Bayar", "Jumlah", "Deskripsi", "Status Approval"]
+    header = [
+        "No",
+        "Tanggal",
+        "Kategori",
+        "Penerima",
+        "Metode Bayar",
+        "Jumlah",
+        "Deskripsi",
+        "Status Approval",
+    ]
     data = [header]
 
     total_jumlah = 0
     for idx, p in enumerate(pengeluaran_list, 1):
         total_jumlah += p.jumlah or 0
-        data.append([
-            str(idx),
-            p.tanggal,
-            kategori_map.get(p.kategori_pengeluaran_id, "-"),
-            p.penerima or "-",
-            p.metode_bayar or "-",
-            _fmt_rupiah(p.jumlah),
-            p.deskripsi or "-",
-            _STATUS_LABEL.get(p.status, p.status or "-"),
-        ])
+        data.append(
+            [
+                str(idx),
+                p.tanggal,
+                kategori_map.get(p.kategori_pengeluaran_id, "-"),
+                p.penerima or "-",
+                p.metode_bayar or "-",
+                _fmt_rupiah(p.jumlah),
+                p.deskripsi or "-",
+                _STATUS_LABEL.get(p.status, p.status or "-"),
+            ]
+        )
 
-    data.append([
-        "", "", "", "", "",
-        f"<b>{_fmt_rupiah(total_jumlah)}</b>",
-        "<b>GRAND TOTAL</b>",
-        "",
-    ])
+    data.append(
+        [
+            "",
+            "",
+            "",
+            "",
+            "",
+            _fmt_rupiah(total_jumlah),
+            "GRAND TOTAL",
+            "",
+        ]
+    )
 
     table = Table(
         data,
         colWidths=[0.8 * cm, 2.2 * cm, 3.0 * cm, 3.0 * cm, 2.4 * cm, 2.4 * cm, 6.5 * cm, 3.0 * cm],
         repeatRows=1,
     )
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), primary_color),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
-        ("ALIGN", (5, 1), (5, -1), "RIGHT"),
-        ("ALIGN", (0, 1), (0, -1), "CENTER"),
-        ("ALIGN", (1, 1), (1, -1), "CENTER"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("BACKGROUND", (0, -1), (-1, -1), primary_color),
-        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
-        ("BOX", (0, 0), (-1, -1), 1, primary_color),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), primary_color),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 9),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING", (0, 0), (-1, 0), 6),
+                ("FONTSIZE", (0, 1), (-1, -1), 8),
+                ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
+                ("ALIGN", (5, 1), (5, -1), "RIGHT"),
+                ("ALIGN", (0, 1), (0, -1), "CENTER"),
+                ("ALIGN", (1, 1), (1, -1), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("BACKGROUND", (0, -1), (-1, -1), primary_color),
+                ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+                ("BOX", (0, 0), (-1, -1), 1, primary_color),
+            ]
+        )
+    )
     elements.append(table)
     elements.append(Spacer(1, 4))
 
-    elements.append(Paragraph(
-        "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
-        ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
-    ))
+    elements.append(
+        Paragraph(
+            "<i>Catatan: Nominal dalam bentuk Rupiah (Rp)</i>",
+            ParagraphStyle("footer_note", fontSize=8, alignment=TA_LEFT, textColor=COLOR_GRAY),
+        )
+    )
     elements.append(Spacer(1, 10))
 
-    elements.append(Paragraph(
-        f"<b>Terbilang:</b> {rupiah_to_words(total_jumlah)} rupiah",
-        ParagraphStyle("terbilang", fontSize=10, fontName="Helvetica-Bold"),
-    ))
+    elements.append(
+        Paragraph(
+            f"<b>Terbilang:</b> {rupiah_to_words(total_jumlah)} rupiah",
+            ParagraphStyle("terbilang", fontSize=10, fontName="Helvetica-Bold"),
+        )
+    )
     elements.append(Spacer(1, 16))
 
     # === FOOTER ===
-    elements.append(_build_footer_table(
-        pendeta=tenant.nama_pendeta or "",
-        ketua=tenant.nama_ketua_keuangan or "",
-        bendahara=tenant.nama_bendahara or "",
-    ))
+    elements.append(
+        _build_footer_table(
+            pendeta=tenant.nama_pendeta or "",
+            ketua=tenant.nama_ketua_keuangan or "",
+            bendahara=tenant.nama_bendahara or "",
+        )
+    )
     elements.append(Spacer(1, 6))
-    elements.append(Paragraph(
-        f"<font size=7 color=gray>Dokumen ini dihasilkan otomatis oleh FLIPUS pada "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.</font>",
-        ParagraphStyle("footer", alignment=TA_RIGHT, fontSize=7, textColor=COLOR_GRAY),
-    ))
+    elements.append(
+        Paragraph(
+            f"<font size=7 color=gray>Dokumen ini dihasilkan otomatis oleh FLIPUS pada "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.</font>",
+            ParagraphStyle("footer", alignment=TA_RIGHT, fontSize=7, textColor=COLOR_GRAY),
+        )
+    )
 
     doc.build(elements)
     pdf_bytes = buffer.getvalue()
