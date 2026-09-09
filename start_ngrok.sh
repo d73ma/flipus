@@ -32,10 +32,10 @@ if ! curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   exit 1
 fi
 
-# 4. Jalankan ngrok tunnel
+# 4. Jalankan ngrok tunnel (--url untuk static domain, ngrok 3.x deprecate --domain)
 if [ -n "${NGROK_DOMAIN:-}" ]; then
   echo "🌐 Membuka https://${NGROK_DOMAIN} → http://localhost:${PORT}"
-  exec ngrok http --domain="${NGROK_DOMAIN}" "${PORT}"
+  exec ngrok http --url="https://${NGROK_DOMAIN}" "${PORT}"
 else
   echo "🌐 Membuka ngrok tunnel (random subdomain) → http://localhost:${PORT}"
   exec ngrok http "${PORT}"
