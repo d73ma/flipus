@@ -26,7 +26,13 @@ from reportlab.platypus import (
 from app.models.pengeluaran import Pengeluaran
 from app.models.tenant import Tenant
 from app.models.transaction import Kuitansi
-from app.services.pdf_generator import _build_header_table, _build_styles, _get_logo_image, _get_tenant_colors
+from app.services.pdf_generator import (
+    _build_header_table,
+    _build_styles,
+    _get_flipus_logo_image,
+    _get_logo_image,
+    _get_tenant_colors,
+)
 from app.utils.number_to_words import terbilang
 
 
@@ -54,7 +60,7 @@ def generate_gabungan_pdf(
         bytes PDF atau path jika output_path diisi.
     """
     primary_color, secondary_color = _get_tenant_colors(tenant)
-    logo_image = _get_logo_image(tenant)
+    logo_image = _get_logo_image(tenant) or _get_flipus_logo_image()
     styles = _build_styles(primary_color)
 
     buffer = BytesIO()
