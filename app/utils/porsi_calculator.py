@@ -93,26 +93,36 @@ def validate_porsi_constraint(
     pct_khusus_jemaat: float, pct_khusus_uni: float,
 ) -> list[str]:
     """
-    Validasi Jerry Model B (pct_uni applied to TOTAL):
-    - Range 0..1 untuk masing-masing
-    - Constraint penjumlahan pct_jemaat + pct_uni ≤ 1.0 per tier
+    Validasi aturan mutlak (Jerry 2026-09-10) — linear Uni → Misi → Jemaat.
+
+    U_T + M_T ≤ 100 untuk tiap tier, dengan J_T = 100 - U_T - M_T (derived).
+    Input di sini: pct_*_jemaat = J_T (derived), pct_*_uni = U_T.
+    M_T diimplisitkan = 100 - J_T - U_T.
+
+    Aturan: if (U<0 or M<0 or U>100 or M>100 or U+M>100) → REJECT.
+    Pesan error: "Total Uni + Misi = X% > 100%. Tidak valid."
 
     Returns list of error messages (kosong = valid).
     """
     errors = []
     pairs = [
-        ("X",      pct_x_jemaat,      pct_x_uni),
-        ("PT",     pct_pt_jemaat,     pct_pt_uni),
+        ("X", pct_x_jemaat, pct_x_uni),
+        ("PT", pct_pt_jemaat, pct_pt_uni),
         ("Khusus", pct_khusus_jemaat, pct_khusus_uni),
     ]
-    for tier, pj, pu in pairs:
-        if not (0.0 <= pj <= 1.0):
-            errors.append(f"{tier} pct_jemaat ({pj}) harus 0..100%")
-        if not (0.0 <= pu <= 1.0):
-            errors.append(f"{tier} pct_uni ({pu}) harus 0..100%")
-        if pj + pu > 1.0 + 1e-9:
+    for tier, jt, ut in pairs:
+        m_implied = 1.0 - jt - ut  # M_T
+        # Range checks (aturan mutlak)
+        if ut < -1e-9 or ut > 1.0 + 1e-9:
+            errors.append(f"{tier}: Porsi Uni {ut*100:.0f}% di luar batas 0..100%. Tidak valid.")
+        if m_implied < -1e-9 or m_implied > 1.0 + 1e-9:
             errors.append(
-                f"{tier}: pct_jemaat ({pj:.0%}) + pct_uni ({pu:.0%}) = "
-                f"{pj+pu:.0%} > 100%. Total porsi tidak boleh melebihi 100%."
+                f"{tier}: Total Uni + Misi = {(ut + m_implied) * 100:.0f}% > 100%. Tidak valid."
             )
+        elif ut + m_implied > 1.0 + 1e-9:
+            errors.append(
+                f"{tier}: Total Uni + Misi = {(ut + m_implied) * 100:.0f}% > 100%. Tidak valid."
+            )
+        if jt < -1e-9 or jt > 1.0 + 1e-9:
+            errors.append(f"{tier}: Porsi Jemaat {jt*100:.0f}% di luar batas 0..100%. Tidak valid.")
     return errors

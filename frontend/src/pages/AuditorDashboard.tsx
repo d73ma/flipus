@@ -114,6 +114,11 @@ const AuditorDashboard = () => {
   // Read-only display of UNI-level percentages (set by Admin Uni)
   const [pctUni, setPctUni] = useState<PersentaseConfig | null>(null);
 
+  // Invalid bila sisa jemaat < 0 → disable Simpan (validasi hanya saat save sesuai aturan)
+  const invalidSisa =
+    100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100) - pctX < 0 ||
+    100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100) - pctPT < 0;
+
   const fetchSabatInfo = async () => {
     try {
       const r = await api.get<SabatInfoOut>('/v1/reports/sabat-info');
@@ -279,8 +284,11 @@ const AuditorDashboard = () => {
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fcd34d', margin: 0 }}>{pctX}%</p>
                 <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
-                  Ke Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
-                  {Math.max(0, 100 - pctX - Math.round((pctUni?.pct_x_uni ?? 0) * 100))}%
+                  Sisa di Jemaat: {Math.max(0, 100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100) - pctX)}%
+                  <br />
+                  <span style={{ opacity: 0.75 }}>
+                    (100% − Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% − Misi {pctX}%)
+                  </span>
                 </p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 16 }}>
@@ -289,8 +297,11 @@ const AuditorDashboard = () => {
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fcd34d', margin: 0 }}>{pctPT}%</p>
                 <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
-                  Ke Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
-                  {Math.max(0, 100 - pctPT - Math.round((pctUni?.pct_pt_uni ?? 0) * 100))}%
+                  Sisa di Jemaat: {Math.max(0, 100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100) - pctPT)}%
+                  <br />
+                  <span style={{ opacity: 0.75 }}>
+                    (100% − Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% − Misi {pctPT}%)
+                  </span>
                 </p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16, opacity: 0.7 }}>
@@ -310,15 +321,20 @@ const AuditorDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100)}
+                  max={100}
                   value={pctX}
                   onChange={(e) => setPctX(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
                 <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
-                  Maksimal {100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% karena{' '}
-                  {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% sudah dialokasikan ke Uni.
+                  Sisa di Jemaat: {100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100) - pctX}%
+                  {' '}(100% − Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% − Misi {pctX}%)
                 </p>
+                {100 - Math.round((pctUni?.pct_x_uni ?? 0) * 100) - pctX < 0 && (
+                  <p style={{ fontSize: 10, color: '#f87171', marginTop: 4 }}>
+                    Total Uni + Misi = {Math.round((pctUni?.pct_x_uni ?? 0) * 100) + pctX}% &gt; 100%. Tidak valid.
+                  </p>
+                )}
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, opacity: 0.9, marginBottom: 8 }}>
@@ -327,20 +343,25 @@ const AuditorDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}
+                  max={100}
                   value={pctPT}
                   onChange={(e) => setPctPT(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
                 <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
-                  Maksimal {100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% karena{' '}
-                  {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% sudah dialokasikan ke Uni.
+                  Sisa di Jemaat: {100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100) - pctPT}%
+                  {' '}(100% − Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% − Misi {pctPT}%)
                 </p>
+                {100 - Math.round((pctUni?.pct_pt_uni ?? 0) * 100) - pctPT < 0 && (
+                  <p style={{ fontSize: 10, color: '#f87171', marginTop: 4 }}>
+                    Total Uni + Misi = {Math.round((pctUni?.pct_pt_uni ?? 0) * 100) + pctPT}% &gt; 100%. Tidak valid.
+                  </p>
+                )}
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                 <button
                   onClick={handleSavePct}
-                  disabled={pctSaving}
+                  disabled={pctSaving || invalidSisa}
                   style={{
                     padding: '8px 18px',
                     background: '#f59e0b',
@@ -350,7 +371,7 @@ const AuditorDashboard = () => {
                     fontSize: 13,
                     fontWeight: 500,
                     cursor: pctSaving ? 'wait' : 'pointer',
-                    opacity: pctSaving ? 0.5 : 1,
+                    opacity: pctSaving || invalidSisa ? 0.5 : 1,
                   }}
                 >
                   {pctSaving ? 'Menyimpan...' : 'Simpan'}

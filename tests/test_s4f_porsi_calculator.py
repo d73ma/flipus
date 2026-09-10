@@ -164,28 +164,31 @@ class TestValidatePorsiConstraint:
         assert errors == []
 
     def test_x_pct_jemaat_negative(self):
+        """X: jemaat negatif → invalid (aturan mutlak 2026-09-10)."""
         errors = validate_porsi_constraint(
             pct_x_jemaat=-0.1, pct_x_uni=0.3,
             pct_pt_jemaat=0.5, pct_pt_uni=0.3,
             pct_khusus_jemaat=0.0, pct_khusus_uni=0.0,
         )
-        assert any("X" in e and "pct_jemaat" in e for e in errors)
+        assert any("X" in e and "Jemaat" in e for e in errors)
 
     def test_x_pct_jemaat_over_1(self):
+        """X: jemaat > 100% → invalid."""
         errors = validate_porsi_constraint(
             pct_x_jemaat=1.1, pct_x_uni=0.0,
             pct_pt_jemaat=0.5, pct_pt_uni=0.0,
             pct_khusus_jemaat=0.0, pct_khusus_uni=0.0,
         )
-        assert any("X" in e and "pct_jemaat" in e for e in errors)
+        assert any("X" in e and "Jemaat" in e for e in errors)
 
     def test_pt_pct_uni_over_1(self):
+        """PT: uni > 100% → invalid."""
         errors = validate_porsi_constraint(
             pct_x_jemaat=0.0, pct_x_uni=0.0,
             pct_pt_jemaat=0.5, pct_pt_uni=1.5,
             pct_khusus_jemaat=0.0, pct_khusus_uni=0.0,
         )
-        assert any("PT" in e and "pct_uni" in e for e in errors)
+        assert any("PT" in e and "Uni" in e for e in errors)
 
     def test_x_constraint_overcommit(self):
         """X: pct_jemaat=0.7 + pct_uni=0.5 = 1.2 > 1.0."""

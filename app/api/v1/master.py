@@ -427,11 +427,10 @@ def update_persentase_config(
         f"x_u={cfg.pct_x_uni},pt_u={cfg.pct_pt_uni},kh_u={cfg.pct_khusus_uni}"
     )
 
-    # === Validasi Jerry (2026-09-09) — model "Uni + Misi ≤ 100, Jemaat = sisa" ===
-    # Prioritas: (1) Admin Uni set pct_uni; (2) Auditor set pct_misi;
-    # (3) Jemaat DERIVED = 100 - uni - misi. Tidak ada input pct_jemaat.
-    # Storage: MISI row `pct_x_jemaat` menyimpan nilai DERIVED jemaat —
-    # frontend auditor menghitungnya = (100 - slider_misi - uni)/100.
+    # === Validasi Jerry (2026-09-10) — ATURAN MUTLAK linear Uni → Misi → Jemaat ===
+    # U_T (Admin Uni) + M_T (Auditor Misi) ≤ 100. J_T = 100 - U_T - M_T (derived).
+    # Storage: MISI row `pct_*_jemaat` = J_T (derived); UNI row `pct_*_uni` = U_T.
+    # M_T = 100 - J_T - U_T (selalu tersimpan implisit sebagai sisa).
     errs: list[str] = []
     eps = 1e-9
 
@@ -446,7 +445,8 @@ def update_persentase_config(
         )
 
     if payload.scope == "MISI":
-        # Auditor menetapkan porsi Misi -> kirim pct_*_jemaat DERIVED.
+        # Auditor menetapkan M_T -> frontend kirim J_T derived = (100 - U - M)/100.
+        # M_implied = 100 - J - U. Validasi: U + M ≤ 100  ⟺  J ≥ 0.
         uni_cfg = _resolve_uni_cfg_for_misi(db, payload.ref_id)
         uni_x = float(uni_cfg.pct_x_uni or 0.0) if uni_cfg else 0.0
         uni_pt = float(uni_cfg.pct_pt_uni or 0.0) if uni_cfg else 0.0
@@ -456,23 +456,25 @@ def update_persentase_config(
             ("PT", payload.pct_pt_jemaat, uni_pt),
             ("Khusus", payload.pct_khusus_jemaat, uni_kh),
         ]
-        for tier_name, pj, pu in tiers:
-            misi_share = 1.0 - pj - pu
-            if misi_share < -eps:
+        for tier_name, jt, ut in tiers:
+            m_implied = 1.0 - jt - ut
+            if ut + m_implied > 1.0 + eps:
                 errs.append(
-                    f"{tier_name}: Total melebihi 100%. Porsi Uni {pu*100:.0f}% + "
-                    f"Porsi Misi {misi_share*100:.0f}% = {(pu+misi_share)*100:.0f}% >100%. "
-                    f"Kurangi salah satu."
+                    f"{tier_name}: Total Uni + Misi = {(ut + m_implied) * 100:.0f}% > 100%. Tidak valid."
                 )
-            elif pj < -eps:
+            if jt < -eps:
                 errs.append(
-                    f"{tier_name}: Porsi Jemaat tidak boleh negatif. Uni {pu*100:.0f}% + "
-                    f"Misi {misi_share*100:.0f}% sudah 100% — Jemaat 0%."
+                    f"{tier_name}: Total Uni + Misi = {(ut + m_implied) * 100:.0f}% > 100%. Tidak valid."
                 )
 
     if payload.scope == "UNI":
-        # Admin menetapkan porsi Uni — cross-check dengan MISI rows.
+        # Admin menetapkan U_T — cross-check M_T_existing di semua MISI rows.
         misi_rows = db.query(MisiKonferens).filter(MisiKonferens.uni_id == payload.ref_id).all()
+        old_u = {
+            "X": float(cfg.pct_x_uni or 0.0),
+            "PT": float(cfg.pct_pt_uni or 0.0),
+            "KH": float(cfg.pct_khusus_uni or 0.0),
+        }
         for misi_row in misi_rows:
             misi_cfg = (
                 db.query(PersentaseConfig)
@@ -482,26 +484,22 @@ def update_persentase_config(
             if not misi_cfg:
                 continue
             tiers = [
-                ("X", float(misi_cfg.pct_x_jemaat or 0.0), payload.pct_x_uni),
-                ("PT", float(misi_cfg.pct_pt_jemaat or 0.0), payload.pct_pt_uni),
-                ("Khusus", float(misi_cfg.pct_khusus_jemaat or 0.0), payload.pct_khusus_uni),
+                ("X", float(misi_cfg.pct_x_jemaat or 0.0), payload.pct_x_uni, old_u["X"]),
+                ("PT", float(misi_cfg.pct_pt_jemaat or 0.0), payload.pct_pt_uni, old_u["PT"]),
+                ("Khusus", float(misi_cfg.pct_khusus_jemaat or 0.0), payload.pct_khusus_uni, old_u["KH"]),
             ]
-            for tier_name, pj, pu_new in tiers:
-                misi_share = 1.0 - pj - (float(cfg.pct_x_uni or 0.0) if tier_name == "X"
-                                        else float(cfg.pct_pt_uni or 0.0) if tier_name == "PT"
-                                        else float(cfg.pct_khusus_uni or 0.0))
-                total_uni_misi = pu_new + misi_share
-                if total_uni_misi > 1.0 + eps:
+            for tier_name, jt, ut_new, ut_old in tiers:
+                m_existing = 1.0 - jt - ut_old
+                if ut_new + m_existing > 1.0 + eps:
                     errs.append(
-                        f"{tier_name}: Total melebihi 100%. Porsi Uni {pu_new*100:.0f}% + "
-                        f"Porsi Misi {misi_share*100:.0f}% (misi {misi_row.kode}) = "
-                        f"{total_uni_misi*100:.0f}% >100%. Kurangi salah satu."
+                        f"{tier_name}: Total Uni + Misi = {(ut_new + m_existing) * 100:.0f}% "
+                        f"> 100% (misi {misi_row.kode}). Tidak valid."
                     )
 
     if errs:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="Persentase tidak valid: " + " | ".join(errs),
+            detail=" | ".join(errs),
         )
 
     # Update

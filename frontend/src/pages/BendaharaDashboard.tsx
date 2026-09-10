@@ -476,13 +476,12 @@ const BendaharaDashboard = () => {
                 Perpuluhan
               </p>
               <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
-                {/* misi = 1 - jemaat(derived) - uni */}
-                {Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100))}%
+                Perpuluhan Keluar dari Jemaat: {Math.min(100, Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat) * 100)))}%
               </p>
               <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
-                KE MISI {Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100))}% ·{' '}
-                Ke Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
-                {Math.max(0, Math.round((pctMisi.pct_x_jemaat) * 100))}%
+                Porsi Uni {Math.round((pctUni?.pct_x_uni ?? 0) * 100)}% + Porsi Misi{' '}
+                {Math.max(0, Math.round((1 - pctMisi.pct_x_jemaat - (pctUni?.pct_x_uni ?? 0)) * 100))}%{' '}
+                | Sisa di Jemaat {Math.max(0, Math.round(pctMisi.pct_x_jemaat * 100))}%
               </p>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
@@ -490,12 +489,12 @@ const BendaharaDashboard = () => {
                 Persembahan
               </p>
               <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
-                {Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100))}%
+                Persembahan Keluar dari Jemaat: {Math.min(100, Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat) * 100)))}%
               </p>
               <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
-                KE MISI {Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100))}% ·{' '}
-                Ke Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
-                {Math.max(0, Math.round((pctMisi.pct_pt_jemaat) * 100))}%
+                Porsi Uni {Math.round((pctUni?.pct_pt_uni ?? 0) * 100)}% + Porsi Misi{' '}
+                {Math.max(0, Math.round((1 - pctMisi.pct_pt_jemaat - (pctUni?.pct_pt_uni ?? 0)) * 100))}%{' '}
+                | Sisa di Jemaat {Math.max(0, Math.round(pctMisi.pct_pt_jemaat * 100))}%
               </p>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
@@ -503,12 +502,11 @@ const BendaharaDashboard = () => {
                 Persembahan Khusus
               </p>
               <p style={{ fontSize: 20, fontWeight: 700, color: '#B8860B', margin: 0 }}>
-                {/* pct_khusus_jemaat = fraction to MISI (semantic inverse dari x/pt) — display langsung */}
-                {Math.round(pctMisi.pct_khusus_jemaat * 100)}%
+                Khusus Keluar dari Jemaat: {Math.min(100, Math.max(0, Math.round(pctMisi.pct_khusus_jemaat * 100)))}%
               </p>
               <p style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
-                KE MISI {Math.round(pctMisi.pct_khusus_jemaat * 100)}% · Ke Uni{' '}
-                {Math.round((pctUni?.pct_khusus_uni ?? 0) * 100)}% · Sisa di Jemaat:{' '}
+                Porsi Uni {Math.round((pctUni?.pct_khusus_uni ?? 0) * 100)}% + Porsi Misi{' '}
+                {Math.round(pctMisi.pct_khusus_jemaat * 100)}% | Sisa di Jemaat:{' '}
                 {Math.max(0, 100 - Math.round(pctMisi.pct_khusus_jemaat * 100) - Math.round((pctUni?.pct_khusus_uni ?? 0) * 100))}%
               </p>
             </div>

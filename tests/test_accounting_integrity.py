@@ -100,13 +100,13 @@ class TestPctConstraints:
         assert "100%" in errors[0]
 
     def test_negative_pct_rejected(self):
-        """pct_jemaat < 0 → invalid."""
+        """pct_jemaat < 0 → invalid (aturan mutlak 2026-09-10: jemaat = sisa)."""
         errors = validate_porsi_constraint(
             pct_x_jemaat=-0.1, pct_x_uni=0.5,
             pct_pt_jemaat=0.5, pct_pt_uni=0.0,
             pct_khusus_jemaat=0.0, pct_khusus_uni=0.0,
         )
-        assert any("X pct_jemaat" in e for e in errors)
+        assert any("X" in e and "Jemaat" in e for e in errors)
 
     def test_pct_gt_1_rejected(self):
         """pct_uni > 1.0 → invalid."""
@@ -115,7 +115,7 @@ class TestPctConstraints:
             pct_pt_jemaat=0.5, pct_pt_uni=0.0,
             pct_khusus_jemaat=0.0, pct_khusus_uni=0.0,
         )
-        assert any("X pct_uni" in e for e in errors)
+        assert any("X" in e and "Uni" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

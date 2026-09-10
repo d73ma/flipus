@@ -279,7 +279,11 @@ const AdminDashboard = () => {
                   Perpuluhan (X) ke Uni
                 </p>
                 <p style={{ fontSize: 28, fontWeight: 700, color: '#fde68a', margin: 0 }}>{pctX}%</p>
-                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>Misi sudah {maxMisiX}% · Sisa di Jemaat: {Math.max(0, 100 - pctX - maxMisiX)}%</p>
+                <p style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+                Misi sudah {maxMisiX}% · Sisa di Jemaat: {Math.max(0, 100 - pctX - maxMisiX)}%
+                <br />
+                <span style={{ opacity: 0.75 }}>(Uni {pctX}% + Misi {maxMisiX}% · Jemaat {Math.max(0, 100 - pctX - maxMisiX)}%)</span>
+              </p>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 16 }}>
                 <p style={{ fontSize: 11, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px 0' }}>
@@ -305,15 +309,20 @@ const AdminDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100 - maxMisiX}
+                  max={100}
                   value={pctX}
                   onChange={(e) => setPctX(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
                 <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
-                  Maksimal {100 - maxMisiX}% karena {maxMisiX}% sudah dialokasikan ke Misi.
-                  Sisa untuk Jemaat akan {Math.max(0, 100 - pctX - maxMisiX)}%.
+                  Sisa di Jemaat: {Math.max(0, 100 - pctX - maxMisiX)}%
+                  {' '}(100% − Uni {pctX}% − Misi {maxMisiX}%)
                 </p>
+                {pctX + maxMisiX > 100 && (
+                  <p style={{ fontSize: 10, color: '#fca5a5', marginTop: 4 }}>
+                    Total Uni + Misi = {pctX + maxMisiX}% &gt; 100%. Tidak valid.
+                  </p>
+                )}
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, opacity: 0.9, marginBottom: 8 }}>
@@ -322,20 +331,25 @@ const AdminDashboard = () => {
                 <input
                   type="range"
                   min={0}
-                  max={100 - maxMisiPT}
+                  max={100}
                   value={pctPT}
                   onChange={(e) => setPctPT(parseInt(e.target.value))}
                   style={{ width: '100%' }}
                 />
                 <p style={{ fontSize: 10, opacity: 0.65, marginTop: 6 }}>
-                  Maksimal {100 - maxMisiPT}% karena {maxMisiPT}% sudah dialokasikan ke Misi.
-                  Sisa untuk Jemaat akan {Math.max(0, 100 - pctPT - maxMisiPT)}%.
+                  Sisa di Jemaat: {Math.max(0, 100 - pctPT - maxMisiPT)}%
+                  {' '}(100% − Uni {pctPT}% − Misi {maxMisiPT}%)
                 </p>
+                {pctPT + maxMisiPT > 100 && (
+                  <p style={{ fontSize: 10, color: '#fca5a5', marginTop: 4 }}>
+                    Total Uni + Misi = {pctPT + maxMisiPT}% &gt; 100%. Tidak valid.
+                  </p>
+                )}
               </div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
                 <button
                   onClick={handleSavePct}
-                  disabled={pctSaving}
+                  disabled={pctSaving || pctX + maxMisiX > 100 || pctPT + maxMisiPT > 100}
                   style={{
                     padding: '8px 18px',
                     background: '#f59e0b',
@@ -345,7 +359,7 @@ const AdminDashboard = () => {
                     fontSize: 13,
                     fontWeight: 500,
                     cursor: pctSaving ? 'wait' : 'pointer',
-                    opacity: pctSaving ? 0.5 : 1,
+                    opacity: pctSaving || pctX + maxMisiX > 100 || pctPT + maxMisiPT > 100 ? 0.5 : 1,
                   }}
                 >
                   {pctSaving ? 'Menyimpan...' : 'Simpan'}
